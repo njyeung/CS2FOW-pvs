@@ -4,10 +4,11 @@
 
 ### Server-side anti-wallhack visibility culling for Counter-Strike 2
 
-[![Release](https://img.shields.io/github/v/release/karola3vax/CS2FOW?label=release)](https://github.com/karola3vax/CS2FOW/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/karola3vax/CS2FOW/build.yml?branch=main&label=build)](https://github.com/karola3vax/CS2FOW/actions)
-[![License](https://img.shields.io/github/license/karola3vax/CS2FOW)](LICENSE)
+[![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?style=for-the-badge&label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
+[![Issues](https://img.shields.io/github/issues/karola3vax/CS2FOW?style=for-the-badge&label=issues)](https://github.com/karola3vax/CS2FOW/issues)
+[![License](https://img.shields.io/github/license/karola3vax/CS2FOW?style=for-the-badge&label=license)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/karola3vax/CS2FOW/main?style=for-the-badge&label=last%20commit)](https://github.com/karola3vax/CS2FOW/commits/main)
 
 </div>
 
