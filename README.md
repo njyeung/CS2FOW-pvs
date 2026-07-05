@@ -1,6 +1,31 @@
+<div align="center">
+
 # CS2FOW
 
-Server-side fog-of-war visibility culling for Counter-Strike 2.
+**Server-side anti-wallhack visibility culling for Counter-Strike 2.**
+
+[![Release](https://img.shields.io/github/v/release/karola3vax/CS2FOW?label=release)](https://github.com/karola3vax/CS2FOW/releases)
+[![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
+[![Latest downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/latest/total?label=latest%20release%20downloads)](https://github.com/karola3vax/CS2FOW/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/karola3vax/CS2FOW/build.yml?branch=main&label=build)](https://github.com/karola3vax/CS2FOW/actions)
+[![License](https://img.shields.io/github/license/karola3vax/CS2FOW)](LICENSE)
+
+</div>
+
+<table>
+<tr>
+<td><b>Name</b><br>CS2FOW</td>
+<td><b>Version</b><br>0.1.0-preview</td>
+<td><b>Plugin</b><br>Metamod</td>
+<td><b>License</b><br>MIT</td>
+</tr>
+<tr>
+<td><b>OS</b><br>Windows x86_64<br>Linux x86_64</td>
+<td><b>CPU</b><br>AVX required</td>
+<td><b>Maps</b><br>Official, custom, Workshop</td>
+<td><b>Runtime</b><br>No engine TraceRay</td>
+</tr>
+</table>
 
 CS2FOW helps reduce what wallhacks can reveal by stopping hidden enemies from
 being transmitted to clients when static map geometry blocks visibility. It is a
