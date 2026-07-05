@@ -216,7 +216,7 @@ void test_visibility_sampling()
 
 	player.velocity = {1000, 0, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].x - 30.0f) < 0.01f);
+	assert(std::fabs(origins[1].x - 60.0f) < 0.01f);
 
 	visibility_tuning disabled = tuning;
 	disabled.max_lookahead_ms = 0;

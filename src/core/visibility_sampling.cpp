@@ -8,7 +8,7 @@ namespace cs2fow
 namespace
 {
 
-constexpr float k_max_prediction_speed = 250.0f;
+constexpr float k_max_prediction_speed = 500.0f;
 constexpr float k_min_prediction_speed = 1.0f;
 constexpr float k_bounds_inflate = 4.0f;
 constexpr float k_vertical_origin_offset = 20.0f;
