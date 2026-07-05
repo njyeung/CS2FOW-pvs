@@ -2,7 +2,7 @@
 
 # CS2FOW
 
-### Server-side anti-wallhack visibility culling for Counter-Strike 2
+### Server-sided anti-wallhack occlusion culling for Counter-Strike 2 servers
 
 [![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?style=for-the-badge&label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
