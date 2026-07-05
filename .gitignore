@@ -1,0 +1,16 @@
+/build/
+/build-linux/
+/packages/
+/__pycache__/
+/data/maps/*
+!/data/maps/.gitkeep
+/tools/vrf/win64/
+/tools/vrf/linux64/
+*.tmp
+*.zip
+*.bvh8
+*.obj
+*.glb
+*.pdb
+*.ilk
+*.pyc

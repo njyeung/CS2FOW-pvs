@@ -1,0 +1,80 @@
+import os
+
+root = builder.sourcePath
+sdk = config.sdk_target.sdk
+
+def configure(compiler, plugin=False):
+  compiler.cxxincludes += [
+    os.path.join(root, 'src', 'core'),
+    os.path.join(root, 'src', 'baker'),
+  os.path.join(root, 'third_party'),
+  os.path.join(root, 'third_party', 'generated'),
+  ]
+  if compiler.behavior == 'msvc':
+    compiler.cflags += ['/W4', '/std:c++20', '/arch:AVX', '/EHsc', '/permissive-']
+    compiler.cflags += ['/MTd'] if builder.options.debug else ['/MT']
+    compiler.defines += ['_CRT_SECURE_NO_WARNINGS', 'NOMINMAX']
+  else:
+    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-mavx']
+    compiler.cxxflags += ['-std=c++20']
+    if plugin:
+      compiler.defines += ['stricmp=strcasecmp', '_stricmp=strcasecmp', '_snprintf=snprintf', '_vsnprintf=vsnprintf', 'HAVE_STDINT_H', 'GNUC']
+      compiler.cflags += ['-fPIC', '-fvisibility=hidden']
+      compiler.cxxflags += ['-fvisibility-inlines-hidden']
+  if builder.options.debug:
+    compiler.defines += ['DEBUG', '_DEBUG']
+    compiler.cflags += ['/Od'] if compiler.behavior == 'msvc' else ['-O0', '-g3']
+  else:
+    compiler.defines += ['NDEBUG']
+    compiler.cflags += ['/O2'] if compiler.behavior == 'msvc' else ['-O3']
+
+core = [
+  os.path.join(root, 'src', 'core', 'bvh8.cpp'),
+  os.path.join(root, 'src', 'core', 'builder.cpp'),
+  os.path.join(root, 'src', 'core', 'map_source.cpp'),
+  os.path.join(root, 'src', 'core', 'subprocess.cpp'),
+  os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
+  os.path.join(root, 'src', 'core', 'vpk.cpp'),
+]
+
+baker = config.cxx.Program('cs2fow_baker')
+configure(baker.compiler)
+baker.sources += core + [
+  os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
+  os.path.join(root, 'src', 'baker', 'main.cpp'),
+]
+builder.Add(baker)
+
+tests = config.cxx.Program('cs2fow_tests')
+configure(tests.compiler)
+if 'NDEBUG' in tests.compiler.defines:
+  tests.compiler.defines.remove('NDEBUG')
+tests.sources += core + [
+  os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
+  os.path.join(root, 'tests', 'tests.cpp'),
+]
+builder.Add(tests)
+
+plugin = config.cxx.Library('cs2fow')
+configure(plugin.compiler, True)
+plugin.compiler.cxxincludes += [
+  os.path.join(root, 'src', 'plugin'),
+  os.path.join(config.mms_root, 'core'),
+  os.path.join(config.mms_root, 'core', 'sourcehook'),
+  os.path.join(sdk['path'], 'public', 'entity2'),
+]
+for manifest in config.sdk_manifests:
+  plugin.compiler.defines += ['SE_{}={}'.format(manifest['define'], manifest['code'])]
+plugin.compiler.defines += ['META_IS_SOURCE2']
+config.SdkHelpers.configureCxx(builder, plugin, sdk)
+plugin.sources += [
+  os.path.join(root, 'src', 'core', 'bvh8.cpp'),
+  os.path.join(root, 'src', 'core', 'map_source.cpp'),
+  os.path.join(root, 'src', 'core', 'subprocess.cpp'),
+  os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
+  os.path.join(root, 'src', 'core', 'vpk.cpp'),
+  os.path.join(root, 'src', 'plugin', 'plugin.cpp'),
+  os.path.join(sdk['path'], 'tier1', 'convar.cpp'),
+  os.path.join(sdk['path'], 'public', 'tier0', 'memoverride.cpp'),
+]
+builder.Add(plugin)

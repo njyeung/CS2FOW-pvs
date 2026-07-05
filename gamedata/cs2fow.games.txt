@@ -1,0 +1,6 @@
+// Update these values when CS2 changes the corresponding engine layouts.
+recipient_slot_offset_windows=576
+recipient_slot_offset_linux=576
+game_entity_system_offset_windows=88
+game_entity_system_offset_linux=80
+
