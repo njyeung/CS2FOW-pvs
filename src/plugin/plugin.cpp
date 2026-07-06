@@ -74,6 +74,8 @@ struct schema_offsets
 	uint32_t maxs {};
 	uint32_t weapon_services {};
 	uint32_t weapons {};
+	uint32_t active_weapon {};
+	uint32_t last_weapon {};
 };
 
 struct player_state
@@ -734,6 +736,8 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.maxs, "CCollisionProperty", "m_vecMaxs");
 	require(fields_.weapon_services, "CBasePlayerPawn", "m_pWeaponServices");
 	require(fields_.weapons, "CPlayer_WeaponServices", "m_hMyWeapons");
+	require(fields_.active_weapon, "CPlayer_WeaponServices", "m_hActiveWeapon");
+	require(fields_.last_weapon, "CPlayer_WeaponServices", "m_hLastWeapon");
 	if (!error.empty())
 	{
 		error = "missing schema fields: " + error;
@@ -1098,15 +1102,21 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				continue;
 			}
-			auto *weapons = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(services) + fields_.weapons);
-			const int weapon_count = std::min(weapons->Count(), static_cast<int>(k_max_weapons));
-			for (int weapon = 0; weapon < weapon_count; ++weapon)
+			const auto clear_handle = [&](CEntityHandle handle)
 			{
-				const int index = entity_index(system->GetEntityInstance((*weapons)[weapon]));
+				const int index = entity_index(system->GetEntityInstance(handle));
 				if (valid_entity_index(index))
 				{
 					info->m_pTransmitEntity->Clear(index);
 				}
+			};
+			clear_handle(field<CEntityHandle>(services, fields_.active_weapon));
+			clear_handle(field<CEntityHandle>(services, fields_.last_weapon));
+			auto *weapons = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(services) + fields_.weapons);
+			const int weapon_count = std::min(weapons->Count(), static_cast<int>(k_max_weapons));
+			for (int weapon = 0; weapon < weapon_count; ++weapon)
+			{
+				clear_handle((*weapons)[weapon]);
 			}
 		}
 	}
