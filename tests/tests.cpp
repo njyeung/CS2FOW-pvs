@@ -248,7 +248,7 @@ void test_visibility_sampling()
 void test_lifecycle_guard()
 {
 	using clock = std::chrono::steady_clock;
-	const auto grace = std::chrono::milliseconds(1000);
+	const auto grace = std::chrono::milliseconds(3000);
 	const auto start = clock::time_point {} + std::chrono::seconds(10);
 	lifecycle_guard guard;
 	lifecycle_key stable;
@@ -258,7 +258,7 @@ void test_lifecycle_guard()
 	stable.alive = true;
 
 	update_lifecycle_guard(guard, stable, true, start, grace);
-	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(999)));
+	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(2999)));
 	assert(lifecycle_allows_hiding(guard, start + grace));
 
 	update_lifecycle_guard(guard, stable, true, start + grace, grace);
@@ -267,18 +267,63 @@ void test_lifecycle_guard()
 	lifecycle_key changed = stable;
 	changed.team = 3;
 	update_lifecycle_guard(guard, changed, true, start + grace + std::chrono::milliseconds(1), grace);
-	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(1999)));
-	assert(lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(2001)));
+	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(5999)));
+	assert(lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(6001)));
 
 	lifecycle_key dead = changed;
 	dead.alive = false;
-	update_lifecycle_guard(guard, dead, false, start + std::chrono::seconds(3), grace);
-	update_lifecycle_guard(guard, dead, false, start + std::chrono::milliseconds(3500), grace);
-	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(4499)));
+	update_lifecycle_guard(guard, dead, false, start + std::chrono::seconds(7), grace);
+	update_lifecycle_guard(guard, dead, false, start + std::chrono::milliseconds(7500), grace);
+	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(10499)));
 
-	update_lifecycle_guard(guard, changed, true, start + std::chrono::milliseconds(4500), grace);
-	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(5499)));
-	assert(lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(5500)));
+	update_lifecycle_guard(guard, changed, true, start + std::chrono::milliseconds(10500), grace);
+	assert(!lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(13499)));
+	assert(lifecycle_allows_hiding(guard, start + std::chrono::milliseconds(13500)));
+}
+
+void test_pair_guard()
+{
+	using clock = std::chrono::steady_clock;
+	const auto warmup = std::chrono::milliseconds(1500);
+	const auto start = clock::time_point {} + std::chrono::seconds(20);
+	lifecycle_key observer;
+	observer.has_controller = true;
+	observer.pawn_entity = 10;
+	observer.team = 2;
+	observer.alive = true;
+	lifecycle_key target = observer;
+	target.pawn_entity = 20;
+	target.team = 3;
+
+	pair_guard guard;
+	update_pair_guard(guard, observer, true, target, true, start, warmup);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1499), 1));
+	pair_note_open(guard, start + std::chrono::milliseconds(1499), 1);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1500), 1));
+	pair_note_open(guard, start + std::chrono::milliseconds(1500), 1);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1501), 1));
+	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(1501), 2));
+
+	lifecycle_key changed = target;
+	changed.team = 2;
+	update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(2000), warmup);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3499), 3));
+	pair_note_open(guard, start + std::chrono::milliseconds(3500), 3);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3500), 3));
+	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(3500), 4));
+
+	lifecycle_key dead = changed;
+	dead.alive = false;
+	update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4000), warmup);
+	update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4500), warmup);
+	pair_note_open(guard, start + std::chrono::milliseconds(5999), 5);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(5999), 6));
+
+	update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(6000), warmup);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7499), 7));
+	pair_note_open(guard, start + std::chrono::milliseconds(7500), 7);
+	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 7));
+	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 8));
 }
 
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
@@ -426,6 +471,7 @@ int main(int argc, char **argv)
 	test_glb(directory);
 	test_visibility_sampling();
 	test_lifecycle_guard();
+	test_pair_guard();
 	test_bvh(directory);
 	std::filesystem::remove_all(directory);
 	std::cout << "cs2fow_tests: all checks passed\n";
