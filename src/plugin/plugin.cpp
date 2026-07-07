@@ -44,6 +44,8 @@ namespace cs2fow
 
 constexpr uint32_t k_max_players = 64;
 constexpr uint32_t k_max_weapons = 64;
+constexpr uint32_t k_max_wearables = 32;
+constexpr uint32_t k_max_hidden_player_entities = 1 + 2 + k_max_weapons + k_max_wearables + 1;
 constexpr uint32_t k_max_gamedata_offset = 4096;
 constexpr uint8_t k_life_alive = 0;
 constexpr uint8_t k_team_t = 2;
@@ -59,6 +61,8 @@ struct schema_offsets
 {
 	uint32_t is_hltv {};
 	uint32_t player_pawn {};
+	uint32_t pawn_controller {};
+	uint32_t health {};
 	uint32_t life_state {};
 	uint32_t team {};
 	uint32_t body_component {};
@@ -76,6 +80,9 @@ struct schema_offsets
 	uint32_t weapons {};
 	uint32_t active_weapon {};
 	uint32_t last_weapon {};
+	uint32_t wearables {};
+	uint32_t hostage_services {};
+	uint32_t carried_hostage_prop {};
 };
 
 struct player_state
@@ -172,6 +179,11 @@ vec3 to_vec3(const Vector &value)
 int entity_index(CEntityInstance *entity)
 {
 	return entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->m_EHandle.GetEntryIndex() : -1;
+}
+
+bool valid_entity_index(int index)
+{
+	return index > 0 && index < MAX_EDICTS;
 }
 
 class visibility_worker
@@ -721,6 +733,8 @@ bool plugin::resolve_schema(std::string &error)
 	};
 	require(fields_.is_hltv, "CBasePlayerController", "m_bIsHLTV");
 	require(fields_.player_pawn, "CCSPlayerController", "m_hPlayerPawn");
+	require(fields_.pawn_controller, "CBasePlayerPawn", "m_hController");
+	require(fields_.health, "CBaseEntity", "m_iHealth");
 	require(fields_.life_state, "CBaseEntity", "m_lifeState");
 	require(fields_.team, "CBaseEntity", "m_iTeamNum");
 	require(fields_.body_component, "CBaseEntity", "m_CBodyComponent");
@@ -738,6 +752,9 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.weapons, "CPlayer_WeaponServices", "m_hMyWeapons");
 	require(fields_.active_weapon, "CPlayer_WeaponServices", "m_hActiveWeapon");
 	require(fields_.last_weapon, "CPlayer_WeaponServices", "m_hLastWeapon");
+	require(fields_.wearables, "CBaseCombatCharacter", "m_hMyWearables");
+	require(fields_.hostage_services, "CCSPlayerPawn", "m_pHostageServices");
+	require(fields_.carried_hostage_prop, "CCSPlayer_HostageServices", "m_hCarriedHostageProp");
 	if (!error.empty())
 	{
 		error = "missing schema fields: " + error;
@@ -961,7 +978,10 @@ bool plugin::capture(snapshot &value)
 			continue;
 		}
 		CEntityInstance *pawn_entity = pawn(controller_entity);
-		if (pawn_entity == nullptr || field<uint8_t>(pawn_entity, fields_.life_state) != k_life_alive)
+		CEntityInstance *pawn_controller = pawn_entity == nullptr ? nullptr : system->GetEntityInstance(field<CEntityHandle>(pawn_entity, fields_.pawn_controller));
+		const int pawn_index = entity_index(pawn_entity);
+		if (pawn_entity == nullptr || pawn_controller != controller_entity || !valid_entity_index(pawn_index) || field<uint8_t>(pawn_entity, fields_.life_state) != k_life_alive
+			|| field<int32_t>(pawn_entity, fields_.health) <= 0)
 		{
 			continue;
 		}
@@ -980,7 +1000,7 @@ bool plugin::capture(snapshot &value)
 		player_state &player = value.players[slot];
 		player.valid = true;
 		player.team = team;
-		player.pawn_entity = entity_index(pawn_entity);
+		player.pawn_entity = pawn_index;
 		player.origin = to_vec3(field<Vector>(scene_node, fields_.abs_origin));
 		player.velocity = to_vec3(field<Vector>(pawn_entity, fields_.abs_velocity));
 		player.mins = to_vec3(field<Vector>(collision, fields_.mins));
@@ -1049,7 +1069,6 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	{
 		return;
 	}
-	const auto valid_entity_index = [](int index) { return index > 0 && index < MAX_EDICTS; };
 	const auto current_player_pawn = [&](uint32_t slot, const player_state &saved)
 	{
 		CEntityInstance *controller_entity = controller(slot);
@@ -1058,8 +1077,9 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			return static_cast<CEntityInstance *>(nullptr);
 		}
 		CEntityInstance *pawn_entity = pawn(controller_entity);
-		if (pawn_entity == nullptr || entity_index(pawn_entity) != saved.pawn_entity || !valid_entity_index(saved.pawn_entity)
-			|| field<uint8_t>(pawn_entity, fields_.life_state) != k_life_alive)
+		CEntityInstance *pawn_controller = pawn_entity == nullptr ? nullptr : system->GetEntityInstance(field<CEntityHandle>(pawn_entity, fields_.pawn_controller));
+		if (pawn_entity == nullptr || pawn_controller != controller_entity || entity_index(pawn_entity) != saved.pawn_entity || !valid_entity_index(saved.pawn_entity)
+			|| field<uint8_t>(pawn_entity, fields_.life_state) != k_life_alive || field<int32_t>(pawn_entity, fields_.health) <= 0)
 		{
 			return static_cast<CEntityInstance *>(nullptr);
 		}
@@ -1096,27 +1116,63 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				continue;
 			}
-			info->m_pTransmitEntity->Clear(player.pawn_entity);
 			void *services = field<void *>(current_pawn, fields_.weapon_services);
 			if (services == nullptr)
 			{
 				continue;
 			}
-			const auto clear_handle = [&](CEntityHandle handle)
+			std::array<int, k_max_hidden_player_entities> hidden_entities {};
+			size_t hidden_count = 0;
+			const auto collect_index = [&](int index)
 			{
-				const int index = entity_index(system->GetEntityInstance(handle));
-				if (valid_entity_index(index))
+				if (!valid_entity_index(index) || hidden_count >= hidden_entities.size())
 				{
-					info->m_pTransmitEntity->Clear(index);
+					return false;
 				}
+				hidden_entities[hidden_count++] = index;
+				return true;
 			};
-			clear_handle(field<CEntityHandle>(services, fields_.active_weapon));
-			clear_handle(field<CEntityHandle>(services, fields_.last_weapon));
-			auto *weapons = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(services) + fields_.weapons);
-			const int weapon_count = std::min(weapons->Count(), static_cast<int>(k_max_weapons));
-			for (int weapon = 0; weapon < weapon_count; ++weapon)
+			const auto collect_handle = [&](CEntityHandle handle)
 			{
-				clear_handle((*weapons)[weapon]);
+				if (!handle.IsValid())
+				{
+					return true;
+				}
+				return collect_index(entity_index(system->GetEntityInstance(handle)));
+			};
+			const auto collect_vector = [&](void *base, uint32_t offset, int max_count)
+			{
+				auto *handles = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(base) + offset);
+				const int count = handles->Count();
+				if (count < 0 || count > max_count)
+				{
+					return false;
+				}
+				for (int item = 0; item < count; ++item)
+				{
+					if (!collect_handle((*handles)[item]))
+					{
+						return false;
+					}
+				}
+				return true;
+			};
+			if (!collect_index(player.pawn_entity)
+				|| !collect_handle(field<CEntityHandle>(services, fields_.active_weapon))
+				|| !collect_handle(field<CEntityHandle>(services, fields_.last_weapon))
+				|| !collect_vector(services, fields_.weapons, static_cast<int>(k_max_weapons))
+				|| !collect_vector(current_pawn, fields_.wearables, static_cast<int>(k_max_wearables)))
+			{
+				continue;
+			}
+			void *hostage_services = field<void *>(current_pawn, fields_.hostage_services);
+			if (hostage_services != nullptr && !collect_handle(field<CEntityHandle>(hostage_services, fields_.carried_hostage_prop)))
+			{
+				continue;
+			}
+			for (size_t entity = 0; entity < hidden_count; ++entity)
+			{
+				info->m_pTransmitEntity->Clear(hidden_entities[entity]);
 			}
 		}
 	}
@@ -1165,12 +1221,17 @@ CEntityIdentity *CEntitySystem::GetEntityIdentity(const CEntityHandle &handle)
 	{
 		return nullptr;
 	}
-	CEntityIdentity *chunk = m_EntityList.m_pIdentityChunks[handle.GetEntryIndex() / MAX_ENTITIES_IN_LIST];
+	const int index = handle.GetEntryIndex();
+	if (index < 0 || index >= MAX_TOTAL_ENTITIES - 1)
+	{
+		return nullptr;
+	}
+	CEntityIdentity *chunk = m_EntityList.m_pIdentityChunks[index / MAX_ENTITIES_IN_LIST];
 	if (chunk == nullptr)
 	{
 		return nullptr;
 	}
-	CEntityIdentity *identity = &chunk[handle.GetEntryIndex() % MAX_ENTITIES_IN_LIST];
+	CEntityIdentity *identity = &chunk[index % MAX_ENTITIES_IN_LIST];
 	return identity->GetRefEHandle() == handle ? identity : nullptr;
 }
 
