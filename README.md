@@ -20,7 +20,7 @@
 
 ## FAQ
 
-This FAQ answers the repeated questions from Reddit, Discord, GitHub, and live
+These are the top repeated questions from Reddit, Discord, GitHub, and live
 server testing.
 
 ### What is CS2FOW?
@@ -32,27 +32,18 @@ If an enemy is fully hidden behind solid map geometry, CS2FOW can stop sending
 that enemy's live entity data to the client. If the client never receives the
 hidden enemy position, a wallhack has much less useful data to draw.
 
-### Is this a visual filter?
+It is not a visual filter. It does not hide pixels on the player's PC. It runs
+on the server and controls which enemy entities are transmitted.
 
-No.
+### Does this work on Valve matchmaking or Premier, and can players get VAC banned?
 
-CS2FOW does not blur, hide, or modify anything on the player's PC. It runs on
-the server and controls which enemy entities are transmitted to each client.
+No. CS2FOW is a Metamod server plugin for community and dedicated servers.
+Players do not install it, and it cannot be used on Valve official matchmaking
+unless Valve implements something similar inside the game.
 
-### Does this work on Valve matchmaking?
-
-No.
-
-CS2FOW is a Metamod server plugin for community and dedicated servers. Players
-do not install it, and it cannot be used on Valve official matchmaking unless
-Valve implements something similar inside the game.
-
-### Can players get VAC banned for joining a CS2FOW server?
-
-No expected risk from CS2FOW itself.
-
-It runs on the server. It does not modify client files, inject into the client,
-or ask players to install anything.
+There is no expected VAC risk from CS2FOW itself. It runs on the server, does
+not modify client files, does not inject into the client, and does not ask
+players to install anything.
 
 ### Can cheats bypass this?
 
@@ -66,151 +57,7 @@ Cheats can still use weaker signals such as sound events, last-known positions,
 common prefire spots, teammate information, or game sense. CS2FOW reduces the
 main wallhack data source; it does not make cheating impossible.
 
-### Does this remove a player from the server?
-
-No.
-
-The enemy still exists normally on the server. Hit registration, bullet
-penetration, damage, movement, and game rules still happen server-side.
-
-CS2FOW only changes whether that enemy entity is transmitted to a specific
-client.
-
-### Can I still wallbang hidden enemies?
-
-Yes.
-
-If you shoot through a wall or door correctly, the server can still register
-the hit. Your client does not need to know the enemy's exact position for the
-server to process the bullet.
-
-### What exactly is hidden?
-
-In the current preview, CS2FOW filters living enemy pawns and their currently
-held weapons from living T/CT recipients.
-
-It does not filter teammates, self, dead players, spectators, HLTV, projectiles,
-dropped world items, particles, effects, or sounds.
-
-### Are bots affected?
-
-Yes, if they are living enemy pawns.
-
-Bots are treated like normal players for visibility computation. Dead bots,
-spectated players, teammates, and spectators are not filtered.
-
-### Why do spectators still see everything?
-
-By design.
-
-CS2FOW filters only for living T/CT players. Dead players, spectators, and HLTV
-remain unfiltered because spectator behavior is different from live gameplay
-and is easier to break.
-
-### Does it block radar cheats?
-
-Partly.
-
-If a radar cheat depends on enemy entity positions sent by the server, CS2FOW
-reduces that data too. Hidden enemies are not transmitted, so there is less
-live position data to draw.
-
-It does not currently hide sound events, teammate information, bomb
-information, or every possible world clue.
-
-### What about sound ESP and footsteps?
-
-Sounds are separate from player entities.
-
-Player position is entity data. Footsteps, gunshots, and other audio cues are
-sound events. CS2FOW currently focuses on entity visibility and does not
-randomize or strip sounds.
-
-Sound filtering needs careful design because the server does not know who is
-cheating. Any sound change affects legitimate players too, and footsteps are a
-core CS mechanic.
-
-### What about smokes?
-
-The current preview does not use smoke as an occluder.
-
-CS2FOW uses static map geometry. Smokes are dynamic and need different handling.
-A simple future version could approximate active smokes with volumes, but real
-smoke behavior needs more research so it does not break normal gameplay.
-
-### What about doors, breakables, props, or moving blockers?
-
-Not covered in the current preview.
-
-CS2FOW uses static baked map geometry. Dynamic occluders such as doors,
-breakables, props, smokes, particles, and projectiles are intentionally out of
-scope for now.
-
-### What about dropped weapons?
-
-Dropped weapons are a real information leak and should be handled later.
-
-They are not continuous player ESP, but they can leak decision-making
-information in clutches. For example, a weapon appearing, disappearing, or
-moving can reveal where a player probably rotated.
-
-The clean future fix is to visibility-filter dropped weapon entities too.
-
-### Why did a weapon muzzle pop in around a corner?
-
-The preview checks points around the player body, not every held weapon muzzle.
-
-If a gun sticks around a corner before the body is visible, the weapon can pop
-in when the player is transmitted. The likely fix is to add weapon muzzle or
-weapon-bounds visibility samples so the player is revealed early when the held
-weapon becomes visible.
-
-### How accurate is the visibility check?
-
-Spatially, it uses the real CS2 map physics resource, not a hand-made map.
-
-The baker extracts static world collision triangles from the mounted map, builds
-a BVH8 acceleration structure, and the runtime checks multiple observer and
-target points against that geometry.
-
-It is accurate for solid static walls, floors, corners, and normal map cover.
-It is not a full simulation of every dynamic gameplay object.
-
-### Does it cause pop-in when peeking?
-
-The goal is early reveal, not exact last-millisecond reveal.
-
-CS2FOW predicts using movement and ping, reveals enemies slightly before exact
-visibility, and keeps revealed enemies visible briefly. This intentionally
-leaks a small near-corner window to avoid late pop-in.
-
-The preview still needs real server testing for edge cases.
-
-### What latency does CS2FOW use?
-
-Player network latency, not server frame time.
-
-CS2FOW uses recipient RTT/ping plus the worker update interval to decide how
-far ahead to reveal. Higher-ping players can receive a larger early-reveal
-buffer, capped by configuration.
-
-### Does higher ping make this worse?
-
-Higher ping is handled by revealing a bit earlier.
-
-That does not make networking perfect, but CS2FOW does not wait for the client
-to say "I cleared the wall." The server already knows player positions and map
-geometry.
-
-### Does CS2FOW run visibility checks every tick?
-
-No.
-
-A worker thread refreshes the visibility matrix on an interval. The default is
-`10ms`. `CheckTransmit` only reads the finished matrix and does not run BVH
-traversal, ray math, file IO, locks, or baking.
-
-### Is this heavy on the server?
+### Does this make the server heavy or run checks every tick?
 
 In testing, no meaningful overhead was observed.
 
@@ -221,7 +68,12 @@ TraceRay spam.
 In a tested 12v12 worst-case scenario, the old trace-based approach could hit
 around `60ms`. CS2FOW averaged around `1ms`, with worst cases around `8ms`.
 
-### What about 32-player deathmatch?
+`CheckTransmit` only reads the finished visibility matrix. BVH traversal, ray
+math, file IO, locks, and baking do not run inside the hot transmit hook.
+
+CS2FOW does not calculate visibility every tick. A worker thread refreshes the
+visibility matrix on an interval. The default is `10ms`. Old snapshots are
+replaced instead of queued.
 
 The worst case is more directed enemy pairs, especially if everyone is an
 enemy.
@@ -231,23 +83,76 @@ AVX packet math, a worker thread, early exits, and cached triangle packets.
 Server owners should still test their own maps and player counts with
 `cs2fow_status`.
 
-### Why is it fast?
+### Does it add delay or make peeking feel bad?
 
-Because it does not ask the engine to trace every segment.
+That is the main tradeoff, so CS2FOW intentionally reveals early.
 
-The baker converts map geometry into a runtime-ready BVH8. At runtime, AVX
-checks multiple child bounds or triangles in parallel. Most visibility checks
-exit early as soon as one clear segment proves the enemy should be visible.
+It uses player movement, ping, a minimum lookahead window, and a short hold time
+to avoid late pop-in. Higher-ping players can receive a larger early-reveal
+buffer, capped by configuration.
 
-### Why AVX instead of AVX2?
+The preview is tuned to prefer a small near-corner information leak over hiding
+an enemy too late.
 
-AVX is the runtime baseline so more servers can run it.
+### Can I still wallbang hidden enemies?
 
-The BVH8 format still uses eight-wide floating-point vectors. That works with
-AVX. AVX2 is mostly useful for integer/vector operations that CS2FOW does not
-heavily depend on in the current traversal path.
+Yes.
 
-There is no scalar fallback in the preview.
+The enemy still exists normally on the server. Hit registration, bullet
+penetration, damage, movement, and game rules still happen server-side. CS2FOW
+only changes whether that enemy entity is transmitted to a specific client.
+
+### What exactly is hidden?
+
+In the current preview, CS2FOW filters living enemy pawns and their obvious
+visual group from living T/CT recipients.
+
+Dead players, spectators, HLTV, teammates, self, projectiles, dropped world
+items, particles, effects, and sounds are not filtered. Bots are treated like
+normal players when they are alive enemies.
+
+### Does it block radar cheats, sound ESP, or other information leaks?
+
+Partly.
+
+If a radar cheat depends on enemy entity positions sent by the server, CS2FOW
+reduces that data too. Hidden enemies are not transmitted, so there is less
+live position data to draw.
+
+It does not currently hide sound events, teammate information, bomb
+information, dropped weapon clues, or every possible world clue. Sounds are
+separate events, and changing them would affect legitimate players too.
+
+### What about smokes, doors, breakables, props, and weapon pop-in?
+
+The current preview uses static baked map geometry only.
+
+Dynamic occluders such as smokes, doors, breakables, props, particles, and
+projectiles need different handling. They are intentionally out of scope until
+they can be handled without breaking normal gameplay.
+
+The preview also checks player body visibility, not every held weapon muzzle.
+Weapon muzzle or weapon-bounds samples are planned so a player can be revealed
+early when the held weapon becomes visible first.
+
+### How accurate is it, and why not just use PVS or engine TraceRay?
+
+Spatially, CS2FOW uses the real CS2 map physics resource, not a hand-made map.
+The baker extracts static world collision triangles from the mounted map, builds
+a BVH8 acceleration structure, and the runtime checks multiple observer and
+target points against that geometry.
+
+It is accurate for solid static walls, floors, corners, and normal map cover.
+It is not a full simulation of every dynamic gameplay object.
+
+PVS is very cheap, but it is area-based and too loose for anti-wallhack. It can
+leak far more than a real visibility check.
+
+Engine TraceRay can be accurate, but doing many traces for every player pair is
+expensive. CS2FOW avoids that by baking map geometry once and using BVH8 + AVX
+ray math in its own worker thread.
+
+## Troubleshooting
 
 ### Why does my VDS say AVX is missing?
 
