@@ -51,7 +51,8 @@ constexpr uint32_t k_max_gamedata_offset = 4096;
 constexpr uint8_t k_life_alive = 0;
 constexpr uint8_t k_team_t = 2;
 constexpr uint8_t k_team_ct = 3;
-constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(1000);
+constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(3000);
+constexpr auto k_pair_baseline_warmup = std::chrono::milliseconds(1500);
 constexpr auto k_auto_bake_timeout = std::chrono::minutes(10);
 static_assert(MAX_EDICTS == 16384);
 
@@ -578,6 +579,7 @@ private:
 	visibility_worker worker_;
 	automatic_baker automatic_baker_;
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
+	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
@@ -666,6 +668,8 @@ void plugin::OnLevelShutdown()
 	worker_.stop();
 	data_ = {};
 	source_ = {};
+	lifecycle_ = {};
+	pair_guards_ = {};
 	map_.clear();
 	if (prerequisites_valid_)
 	{
@@ -1001,6 +1005,7 @@ void plugin::change_map(const std::string &map)
 	data_ = {};
 	source_ = {};
 	lifecycle_ = {};
+	pair_guards_ = {};
 	map_ = map;
 	if (!prerequisites_valid_)
 	{
@@ -1034,11 +1039,15 @@ bool plugin::capture(snapshot &value)
 	value.sequence = ++snapshot_sequence_;
 	value.captured = std::chrono::steady_clock::now();
 	const auto now = value.captured;
+	std::array<lifecycle_key, k_max_players> keys;
+	std::array<bool, k_max_players> stable_slots {};
 	for (uint32_t slot = 0; slot < k_max_players; ++slot)
 	{
 		live_player live;
 		const lifecycle_key key = player_lifecycle(slot, system, &live);
+		keys[slot] = key;
 		const bool stable = live.pawn != nullptr;
+		stable_slots[slot] = stable;
 		update_lifecycle_guard(lifecycle_[slot], key, stable, now, k_lifecycle_fail_open);
 		if (!stable || !lifecycle_allows_hiding(lifecycle_[slot], now))
 		{
@@ -1065,6 +1074,14 @@ bool plugin::capture(snapshot &value)
 		if (INetChannelInfo *channel = engine_->GetPlayerNetInfo(CPlayerSlot(static_cast<int>(slot))); channel != nullptr)
 		{
 			player.rtt_seconds = std::max(0.0f, channel->GetEngineLatency());
+		}
+	}
+	for (uint32_t observer = 0; observer < k_max_players; ++observer)
+	{
+		for (uint32_t target = 0; target < k_max_players; ++target)
+		{
+			update_pair_guard(pair_guards_[observer][target], keys[observer], stable_slots[observer],
+				keys[target], stable_slots[target], now, k_pair_baseline_warmup);
 		}
 	}
 	return true;
@@ -1157,13 +1174,31 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
 			const player_state &player = result->players[target];
-			if (result->visible[slot][target] || !player.valid || player.team == observer.team)
+			if (!player.valid || player.team == observer.team)
 			{
 				continue;
 			}
 			CEntityInstance *current_pawn = current_player_pawn(target, player);
 			if (current_pawn == nullptr)
 			{
+				continue;
+			}
+			pair_guard &guard = pair_guards_[slot][target];
+			const bool pawn_marked = info->m_pTransmitEntity->IsBitSet(player.pawn_entity);
+			if (result->visible[slot][target])
+			{
+				if (pawn_marked)
+				{
+					pair_note_open(guard, now, result->sequence);
+				}
+				continue;
+			}
+			if (!pair_allows_hiding(guard, now, result->sequence))
+			{
+				if (pawn_marked)
+				{
+					pair_note_open(guard, now, result->sequence);
+				}
 				continue;
 			}
 			void *services = field<void *>(current_pawn, fields_.weapon_services);
