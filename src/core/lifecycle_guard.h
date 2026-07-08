@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 
 namespace cs2fow
@@ -35,6 +37,15 @@ struct pair_guard
 	uint64_t baseline_sequence {};
 	bool baseline_opened {};
 	bool initialized {};
+};
+
+template <typename handle_type, size_t max_count>
+struct hidden_entity_group
+{
+	std::array<handle_type, max_count> handles {};
+	handle_type source {};
+	size_t count {};
+	std::chrono::steady_clock::time_point quarantine_until {};
 };
 
 inline bool lifecycle_changed(const lifecycle_key &left, const lifecycle_key &right)
@@ -94,6 +105,55 @@ inline void pair_note_open(pair_guard &guard, std::chrono::steady_clock::time_po
 inline bool pair_allows_hiding(const pair_guard &guard, std::chrono::steady_clock::time_point now, uint64_t sequence)
 {
 	return guard.initialized && now >= guard.fail_open_until && guard.baseline_opened && guard.baseline_sequence != sequence;
+}
+
+template <typename handle_type, size_t max_count>
+inline void hidden_group_clear(hidden_entity_group<handle_type, max_count> &group)
+{
+	group = {};
+}
+
+template <typename handle_type, size_t max_count>
+inline void hidden_group_store(hidden_entity_group<handle_type, max_count> &group,
+	const handle_type &source, const std::array<handle_type, max_count> &handles, size_t count,
+	std::chrono::steady_clock::time_point now, std::chrono::milliseconds quarantine)
+{
+	group.source = source;
+	group.handles = handles;
+	group.count = count > max_count ? max_count : count;
+	group.quarantine_until = now + quarantine;
+}
+
+template <typename handle_type, size_t max_count>
+inline bool hidden_group_quarantined(hidden_entity_group<handle_type, max_count> &group, std::chrono::steady_clock::time_point now)
+{
+	if (group.count == 0)
+	{
+		return false;
+	}
+	if (now >= group.quarantine_until)
+	{
+		hidden_group_clear(group);
+		return false;
+	}
+	return true;
+}
+
+template <typename handle_type, size_t max_count, typename predicate_type>
+inline bool hidden_group_all_of(const hidden_entity_group<handle_type, max_count> &group, predicate_type predicate)
+{
+	if (group.count == 0)
+	{
+		return false;
+	}
+	for (size_t index = 0; index < group.count; ++index)
+	{
+		if (!predicate(group.handles[index]))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 } // namespace cs2fow

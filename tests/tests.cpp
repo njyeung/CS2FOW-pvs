@@ -197,27 +197,29 @@ float max_x(const std::array<vec3, k_visibility_target_count> &points)
 void test_visibility_sampling()
 {
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
-	const visibility_tuning tuning {10, 120, 210, 21.0f};
+	const visibility_tuning tuning {1, 200, 250, 64.0f};
 	visibility_player player {};
 	player.eye = {0, 0, 0};
 	player.origin = {0, 0, 0};
 	player.mins = {-16, -16, 0};
 	player.maxs = {16, 16, 72};
 
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.0f, tuning) - 0.12f) < 0.001f);
-	assert(std::fabs(visibility_effective_lookahead_seconds(0.2f, tuning) - 0.21f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.0f, tuning) - 0.201f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.03f, tuning) - 0.216f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.08f, tuning) - 0.241f) < 0.001f);
+	assert(std::fabs(visibility_effective_lookahead_seconds(0.1f, tuning) - 0.25f) < 0.001f);
 
 	player.velocity = {100, 0, 0};
 	auto origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].x - 21.0f) < 0.01f && origins[1].y == 0.0f);
+	assert(std::fabs(origins[1].x - 64.0f) < 0.01f && origins[1].y == 0.0f);
 
 	player.velocity = {0, 10, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].y - 21.0f) < 0.01f);
+	assert(std::fabs(origins[1].y - 64.0f) < 0.01f);
 
 	player.velocity = {1000, 0, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
-	assert(std::fabs(origins[1].x - 60.0f) < 0.01f);
+	assert(std::fabs(origins[1].x - 100.5f) < 0.01f);
 
 	visibility_tuning disabled = tuning;
 	disabled.max_lookahead_ms = 0;
@@ -242,7 +244,7 @@ void test_visibility_sampling()
 	const auto no_observer_lookahead = visibility_targets(open, target, tuning, 0.0f);
 	const auto swept_targets = visibility_targets(open, target, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
 	assert(std::fabs(max_x(no_observer_lookahead) - max_x(current_targets)) < 0.01f);
-	assert(max_x(swept_targets) > max_x(current_targets) + 10.0f);
+	assert(max_x(swept_targets) > max_x(current_targets) + 60.0f);
 }
 
 void test_lifecycle_guard()
@@ -326,10 +328,33 @@ void test_pair_guard()
 	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 8));
 }
 
+void test_hidden_entity_group()
+{
+	using clock = std::chrono::steady_clock;
+	const auto start = clock::time_point {} + std::chrono::seconds(30);
+	hidden_entity_group<uint32_t, 4> group;
+	std::array<uint32_t, 4> handles {10, 11, 12, 0};
+
+	hidden_group_store(group, 10u, handles, 3, start, std::chrono::milliseconds(3000));
+	assert(group.count == 3);
+	assert(group.source == 10u);
+	assert(hidden_group_quarantined(group, start + std::chrono::milliseconds(2999)));
+	assert(!hidden_group_quarantined(group, start + std::chrono::milliseconds(3000)));
+	assert(group.count == 0);
+
+	hidden_group_store(group, 10u, handles, 3, start, std::chrono::milliseconds(3000));
+	std::array<bool, 16> marked {};
+	marked[10] = true;
+	marked[11] = true;
+	assert(!hidden_group_all_of(group, [&](uint32_t handle) { return marked[handle]; }));
+	marked[12] = true;
+	assert(hidden_group_all_of(group, [&](uint32_t handle) { return marked[handle]; }));
+}
+
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 {
 	constexpr uint32_t k_players = 32;
-	const visibility_tuning tuning {10, 120, 210, 21.0f};
+	const visibility_tuning tuning {1, 200, 250, 64.0f};
 	std::mt19937 random(0x51f0u);
 	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
 	std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);
@@ -472,6 +497,7 @@ int main(int argc, char **argv)
 	test_visibility_sampling();
 	test_lifecycle_guard();
 	test_pair_guard();
+	test_hidden_entity_group();
 	test_bvh(directory);
 	std::filesystem::remove_all(directory);
 	std::cout << "cs2fow_tests: all checks passed\n";

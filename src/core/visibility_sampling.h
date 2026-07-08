@@ -24,10 +24,10 @@ struct visibility_player
 
 struct visibility_tuning
 {
-	uint32_t update_interval_ms {10};
-	uint32_t min_lookahead_ms {120};
-	uint32_t max_lookahead_ms {210};
-	float peek_margin_units {21.0f};
+	uint32_t update_interval_ms {1};
+	uint32_t min_lookahead_ms {200};
+	uint32_t max_lookahead_ms {250};
+	float peek_margin_units {64.0f};
 };
 
 float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility_tuning &tuning);

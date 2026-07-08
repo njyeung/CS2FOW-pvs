@@ -10,9 +10,10 @@ namespace
 
 constexpr float k_max_prediction_speed = 500.0f;
 constexpr float k_min_prediction_speed = 1.0f;
-constexpr float k_bounds_inflate = 4.0f;
+constexpr float k_bounds_inflate = 16.0f;
 constexpr float k_vertical_origin_offset = 20.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
+constexpr float k_rtt_lookahead_scale = 0.5f;
 
 float distance_sq(vec3 a, vec3 b)
 {
@@ -74,7 +75,7 @@ float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility
 		return 0.0f;
 	}
 	const float rtt_ms = std::max(0.0f, rtt_seconds) * 1000.0f;
-	const float wanted_ms = std::max(rtt_ms + static_cast<float>(tuning.update_interval_ms), static_cast<float>(tuning.min_lookahead_ms));
+	const float wanted_ms = static_cast<float>(tuning.min_lookahead_ms + tuning.update_interval_ms) + rtt_ms * k_rtt_lookahead_scale;
 	return std::clamp(wanted_ms, 0.0f, static_cast<float>(tuning.max_lookahead_ms)) / 1000.0f;
 }
 

@@ -52,6 +52,7 @@ constexpr uint8_t k_life_alive = 0;
 constexpr uint8_t k_team_t = 2;
 constexpr uint8_t k_team_ct = 3;
 constexpr auto k_lifecycle_fail_open = std::chrono::milliseconds(3000);
+constexpr auto k_hidden_entity_quarantine = std::chrono::milliseconds(3000);
 constexpr auto k_pair_baseline_warmup = std::chrono::milliseconds(1500);
 constexpr auto k_auto_bake_timeout = std::chrono::minutes(10);
 static_assert(MAX_EDICTS == 16384);
@@ -91,6 +92,7 @@ struct schema_offsets
 	uint32_t has_death_info {};
 	uint32_t death_info_time {};
 	uint32_t carried_hostage_prop {};
+	uint32_t ragdoll_source {};
 };
 
 struct player_state
@@ -118,6 +120,13 @@ struct live_player
 	CEntityInstance *pawn {};
 	int pawn_entity {-1};
 	uint8_t team {};
+};
+
+using visual_entity_group = hidden_entity_group<CEntityHandle, k_max_hidden_player_entities>;
+
+struct ragdoll_cache
+{
+	std::array<CEntityHandle, MAX_EDICTS> by_source {};
 };
 
 struct visibility_result
@@ -196,9 +205,30 @@ int entity_index(CEntityInstance *entity)
 	return entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->m_EHandle.GetEntryIndex() : -1;
 }
 
+CEntityHandle entity_handle(CEntityInstance *entity)
+{
+	return entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->GetRefEHandle() : CEntityHandle {};
+}
+
 bool valid_entity_index(int index)
 {
 	return index > 0 && index < MAX_EDICTS;
+}
+
+int resolve_entity_index(CGameEntitySystem *system, CEntityHandle handle)
+{
+	if (system == nullptr || !handle.IsValid())
+	{
+		return -1;
+	}
+	return entity_index(system->GetEntityInstance(handle));
+}
+
+bool is_ragdoll_class(const char *name)
+{
+	return name != nullptr && (std::strcmp(name, "prop_ragdoll") == 0
+		|| std::strcmp(name, "physics_prop_ragdoll") == 0
+		|| std::strcmp(name, "prop_ragdoll_attached") == 0);
 }
 
 class visibility_worker
@@ -557,6 +587,11 @@ private:
 	CEntityInstance *controller(uint32_t slot) const;
 	CEntityInstance *pawn(CEntityInstance *controller) const;
 	lifecycle_key player_lifecycle(uint32_t slot, CGameEntitySystem *system, live_player *live) const;
+	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
+	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
+	void clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
+	void refresh_ragdoll_cache(CGameEntitySystem *system);
+	void reset_transmit_state();
 	bool capture(snapshot &value);
 
 	ISmmAPI *api_ {};
@@ -580,6 +615,8 @@ private:
 	automatic_baker automatic_baker_;
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
+	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
+	ragdoll_cache ragdolls_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
@@ -588,11 +625,11 @@ private:
 plugin g_plugin;
 
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true);
-CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 10, true, 10, true, 250);
-CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum latency lookahead", 210, true, 0, true, 250);
-CConVar<int> cs2fow_min_lookahead_ms("cs2fow_min_lookahead_ms", FCVAR_NONE, "Minimum reveal lookahead", 120, true, 0, true, 250);
-CConVar<int> cs2fow_peek_margin_units("cs2fow_peek_margin_units", FCVAR_NONE, "Minimum moving peek margin in Source units", 21, true, 0, true, 64);
-CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 150, true, 0, true, 1000);
+CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
+CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum latency lookahead", 250, true, 0, true, 250);
+CConVar<int> cs2fow_min_lookahead_ms("cs2fow_min_lookahead_ms", FCVAR_NONE, "Minimum reveal lookahead", 200, true, 0, true, 250);
+CConVar<int> cs2fow_peek_margin_units("cs2fow_peek_margin_units", FCVAR_NONE, "Minimum moving peek margin in Source units", 64, true, 0, true, 64);
+CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 250, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
 
 CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
@@ -668,8 +705,7 @@ void plugin::OnLevelShutdown()
 	worker_.stop();
 	data_ = {};
 	source_ = {};
-	lifecycle_ = {};
-	pair_guards_ = {};
+	reset_transmit_state();
 	map_.clear();
 	if (prerequisites_valid_)
 	{
@@ -780,6 +816,7 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.has_death_info, "CCSPlayerPawn", "m_bHasDeathInfo");
 	require(fields_.death_info_time, "CCSPlayerPawn", "m_flDeathInfoTime");
 	require(fields_.carried_hostage_prop, "CCSPlayer_HostageServices", "m_hCarriedHostageProp");
+	fields_.ragdoll_source = resolve_field(schema_, "CRagdollProp", "m_hRagdollSource");
 	if (!error.empty())
 	{
 		error = "missing schema fields: " + error;
@@ -855,11 +892,144 @@ lifecycle_key plugin::player_lifecycle(uint32_t slot, CGameEntitySystem *system,
 	return key;
 }
 
+bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn_entity, visual_entity_group &group) const
+{
+	hidden_group_clear(group);
+	if (system == nullptr || pawn_entity == nullptr)
+	{
+		return false;
+	}
+	void *services = field<void *>(pawn_entity, fields_.weapon_services);
+	if (services == nullptr)
+	{
+		return false;
+	}
+	const auto collect_handle = [&](CEntityHandle handle)
+	{
+		if (!handle.IsValid())
+		{
+			return true;
+		}
+		if (!valid_entity_index(resolve_entity_index(system, handle)) || group.count >= group.handles.size())
+		{
+			return false;
+		}
+		group.handles[group.count++] = handle;
+		return true;
+	};
+	const auto collect_vector = [&](void *base, uint32_t offset, int max_count)
+	{
+		auto *handles = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(base) + offset);
+		const int count = handles->Count();
+		if (count < 0 || count > max_count)
+		{
+			return false;
+		}
+		for (int item = 0; item < count; ++item)
+		{
+			if (!collect_handle((*handles)[item]))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+	group.source = entity_handle(pawn_entity);
+	if (!group.source.IsValid()
+		|| !collect_handle(group.source)
+		|| !collect_handle(field<CEntityHandle>(services, fields_.active_weapon))
+		|| !collect_handle(field<CEntityHandle>(services, fields_.last_weapon))
+		|| !collect_vector(services, fields_.weapons, static_cast<int>(k_max_weapons))
+		|| !collect_vector(pawn_entity, fields_.wearables, static_cast<int>(k_max_wearables)))
+	{
+		hidden_group_clear(group);
+		return false;
+	}
+	void *hostage_services = field<void *>(pawn_entity, fields_.hostage_services);
+	if (hostage_services != nullptr && !collect_handle(field<CEntityHandle>(hostage_services, fields_.carried_hostage_prop)))
+	{
+		hidden_group_clear(group);
+		return false;
+	}
+	return group.count != 0;
+}
+
+bool plugin::group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const
+{
+	if (bits == nullptr || group.count == 0)
+	{
+		return false;
+	}
+	return hidden_group_all_of(group, [&](CEntityHandle handle)
+	{
+		const int index = resolve_entity_index(system, handle);
+		return valid_entity_index(index) && bits->IsBitSet(index);
+	});
+}
+
+void plugin::clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const
+{
+	if (bits == nullptr)
+	{
+		return;
+	}
+	for (size_t entity = 0; entity < group.count; ++entity)
+	{
+		const int index = resolve_entity_index(system, group.handles[entity]);
+		if (valid_entity_index(index))
+		{
+			bits->Clear(index);
+		}
+	}
+	const int source_index = group.source.GetEntryIndex();
+	if (valid_entity_index(source_index))
+	{
+		const int ragdoll_index = resolve_entity_index(system, ragdolls_.by_source[source_index]);
+		if (valid_entity_index(ragdoll_index))
+		{
+			bits->Clear(ragdoll_index);
+		}
+	}
+}
+
+void plugin::refresh_ragdoll_cache(CGameEntitySystem *system)
+{
+	ragdolls_ = {};
+	if (system == nullptr || fields_.ragdoll_source == 0)
+	{
+		return;
+	}
+	for (CEntityIdentity *identity = system->m_EntityList.m_pFirstActiveEntity; identity != nullptr; identity = identity->m_pNext)
+	{
+		CEntityInstance *entity = identity->m_pInstance;
+		if (entity == nullptr || !is_ragdoll_class(identity->GetClassname()))
+		{
+			continue;
+		}
+		const int ragdoll_index = entity_index(entity);
+		const CEntityHandle source = field<CEntityHandle>(entity, fields_.ragdoll_source);
+		const int source_index = source.GetEntryIndex();
+		if (valid_entity_index(ragdoll_index) && valid_entity_index(source_index) && system->GetEntityInstance(source) != nullptr)
+		{
+			ragdolls_.by_source[source_index] = entity_handle(entity);
+		}
+	}
+}
+
 void plugin::disable(std::string reason)
 {
 	worker_.stop();
 	data_ = {};
+	reset_transmit_state();
 	disabled_reason_ = std::move(reason);
+}
+
+void plugin::reset_transmit_state()
+{
+	lifecycle_ = {};
+	pair_guards_ = {};
+	hidden_groups_ = {};
+	ragdolls_ = {};
 }
 
 bool plugin::resolve_map_source(const std::string &map, map_source &source, std::string &error) const
@@ -943,6 +1113,7 @@ bool plugin::load_map_bake(const std::filesystem::path &path, const std::string 
 void plugin::activate(bvh8_data data)
 {
 	worker_.stop();
+	reset_transmit_state();
 	data_ = std::move(data);
 	disabled_reason_.clear();
 	worker_.start(&data_);
@@ -1004,8 +1175,7 @@ void plugin::change_map(const std::string &map)
 	worker_.stop();
 	data_ = {};
 	source_ = {};
-	lifecycle_ = {};
-	pair_guards_ = {};
+	reset_transmit_state();
 	map_ = map;
 	if (!prerequisites_valid_)
 	{
@@ -1104,6 +1274,13 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	{
 		return;
 	}
+	CGameEntitySystem *system = entity_system();
+	if (system == nullptr)
+	{
+		disable("game entity system is unavailable");
+		return;
+	}
+	refresh_ragdoll_cache(system);
 	const auto now = std::chrono::steady_clock::now();
 	if (now - last_snapshot_ < std::chrono::milliseconds(cs2fow_update_interval_ms.Get()))
 	{
@@ -1174,91 +1351,60 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
 			const player_state &player = result->players[target];
+			visual_entity_group &stored_group = hidden_groups_[slot][target];
+			if (stored_group.count != 0 && now >= stored_group.quarantine_until)
+			{
+				hidden_group_clear(stored_group);
+			}
 			if (!player.valid || player.team == observer.team)
 			{
+				if (hidden_group_quarantined(stored_group, now))
+				{
+					clear_group(system, info->m_pTransmitEntity, stored_group);
+				}
 				continue;
 			}
 			CEntityInstance *current_pawn = current_player_pawn(target, player);
 			if (current_pawn == nullptr)
 			{
+				if (hidden_group_quarantined(stored_group, now))
+				{
+					clear_group(system, info->m_pTransmitEntity, stored_group);
+				}
 				continue;
 			}
 			pair_guard &guard = pair_guards_[slot][target];
-			const bool pawn_marked = info->m_pTransmitEntity->IsBitSet(player.pawn_entity);
+			visual_entity_group current_group;
+			const bool current_group_valid = collect_player_visual_group(system, current_pawn, current_group);
+			const bool full_group_marked = current_group_valid && group_fully_marked(system, info->m_pTransmitEntity, current_group);
 			if (result->visible[slot][target])
 			{
-				if (pawn_marked)
+				if (full_group_marked)
 				{
 					pair_note_open(guard, now, result->sequence);
+					hidden_group_clear(stored_group);
 				}
 				continue;
 			}
 			if (!pair_allows_hiding(guard, now, result->sequence))
 			{
-				if (pawn_marked)
+				if (full_group_marked)
 				{
 					pair_note_open(guard, now, result->sequence);
+					hidden_group_clear(stored_group);
 				}
 				continue;
 			}
-			void *services = field<void *>(current_pawn, fields_.weapon_services);
-			if (services == nullptr)
+			if (!current_group_valid)
 			{
+				if (hidden_group_quarantined(stored_group, now))
+				{
+					clear_group(system, info->m_pTransmitEntity, stored_group);
+				}
 				continue;
 			}
-			std::array<int, k_max_hidden_player_entities> hidden_entities {};
-			size_t hidden_count = 0;
-			const auto collect_index = [&](int index)
-			{
-				if (!valid_entity_index(index) || hidden_count >= hidden_entities.size())
-				{
-					return false;
-				}
-				hidden_entities[hidden_count++] = index;
-				return true;
-			};
-			const auto collect_handle = [&](CEntityHandle handle)
-			{
-				if (!handle.IsValid())
-				{
-					return true;
-				}
-				return collect_index(entity_index(system->GetEntityInstance(handle)));
-			};
-			const auto collect_vector = [&](void *base, uint32_t offset, int max_count)
-			{
-				auto *handles = reinterpret_cast<CUtlVector<CEntityHandle> *>(reinterpret_cast<uintptr_t>(base) + offset);
-				const int count = handles->Count();
-				if (count < 0 || count > max_count)
-				{
-					return false;
-				}
-				for (int item = 0; item < count; ++item)
-				{
-					if (!collect_handle((*handles)[item]))
-					{
-						return false;
-					}
-				}
-				return true;
-			};
-			if (!collect_index(player.pawn_entity)
-				|| !collect_handle(field<CEntityHandle>(services, fields_.active_weapon))
-				|| !collect_handle(field<CEntityHandle>(services, fields_.last_weapon))
-				|| !collect_vector(services, fields_.weapons, static_cast<int>(k_max_weapons))
-				|| !collect_vector(current_pawn, fields_.wearables, static_cast<int>(k_max_wearables)))
-			{
-				continue;
-			}
-			void *hostage_services = field<void *>(current_pawn, fields_.hostage_services);
-			if (hostage_services != nullptr && !collect_handle(field<CEntityHandle>(hostage_services, fields_.carried_hostage_prop)))
-			{
-				continue;
-			}
-			for (size_t entity = 0; entity < hidden_count; ++entity)
-			{
-				info->m_pTransmitEntity->Clear(hidden_entities[entity]);
-			}
+			hidden_group_store(stored_group, current_group.source, current_group.handles, current_group.count, now, k_hidden_entity_quarantine);
+			clear_group(system, info->m_pTransmitEntity, current_group);
 		}
 	}
 }
