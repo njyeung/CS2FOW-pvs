@@ -6,13 +6,15 @@ const k_source_units_per_meter = 39.3700787;
 const k_max_prediction_speed = 500.0;
 const k_min_prediction_speed = 1.0;
 const k_bounds_inflate = 16.0;
-const k_vertical_origin_offset = 32.0;
+const k_shoulder_origin_offset = 24.0;
+const k_vertical_origin_offset = 24.0;
 const k_same_point_epsilon_sq = 1.0e-4;
 const k_rtt_lookahead_scale = 2.0;
+const k_degrees_to_radians = 0.017453292519943295769;
 const k_min_lookahead_ms = 200.0;
 const k_max_lookahead_ms = 500.0;
 const k_peek_margin_units = 96.0;
-const k_visibility_origin_count = 6;
+const k_visibility_origin_count = 10;
 const k_visibility_target_count = 16;
 const k_visibility_ray_count = k_visibility_origin_count * k_visibility_target_count;
 
@@ -112,7 +114,8 @@ function read_observer()
 {
 	return {
 		eye: vec3(read_number("eye-x"), read_number("eye-y"), read_number("eye-z")),
-		velocity: vec3(read_number("obs-vx"), read_number("obs-vy"), read_number("obs-vz"))
+		velocity: vec3(read_number("obs-vx"), read_number("obs-vy"), read_number("obs-vz")),
+		eye_yaw_degrees: read_number("eye-yaw")
 	};
 }
 
@@ -196,17 +199,33 @@ function safe_origin(bvh, eye, candidate)
 	return candidate;
 }
 
+function eye_right(yaw_degrees)
+{
+	const yaw = yaw_degrees * k_degrees_to_radians;
+	return vec3(Math.sin(yaw), -Math.cos(yaw), 0);
+}
+
 function visibility_origins(bvh, player, lookahead_seconds)
 {
 	const predicted = add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds));
-	const up = vec3(player.eye.x, player.eye.y, player.eye.z + k_vertical_origin_offset);
-	const down = vec3(player.eye.x, player.eye.y, player.eye.z - k_vertical_origin_offset);
-	const predicted_up = vec3(predicted.x, predicted.y, predicted.z + k_vertical_origin_offset);
-	const predicted_down = vec3(predicted.x, predicted.y, predicted.z - k_vertical_origin_offset);
+	const shoulder = mul(eye_right(player.eye_yaw_degrees || 0), k_shoulder_origin_offset);
+	const left = sub(player.eye, shoulder);
+	const right = add(player.eye, shoulder);
+	const predicted_left = sub(predicted, shoulder);
+	const predicted_right = add(predicted, shoulder);
+	const vertical = vec3(0, 0, k_vertical_origin_offset);
+	const up = add(player.eye, vertical);
+	const down = sub(player.eye, vertical);
+	const predicted_up = add(predicted, vertical);
+	const predicted_down = sub(predicted, vertical);
 
 	return [
 		player.eye,
 		safe_origin(bvh, player.eye, predicted),
+		safe_origin(bvh, player.eye, left),
+		safe_origin(bvh, player.eye, right),
+		safe_origin(bvh, player.eye, predicted_left),
+		safe_origin(bvh, player.eye, predicted_right),
 		safe_origin(bvh, player.eye, up),
 		safe_origin(bvh, player.eye, down),
 		safe_origin(bvh, player.eye, predicted_up),
@@ -843,7 +862,7 @@ function update_scene()
 	const bvh_text = active_bvh ? active_bvh.info_text() : "BVH8: none";
 	$("status").textContent = [
 		status_extra,
-		`lookahead=${(lookahead * 1000).toFixed(0)}ms ping=${ping_ms.toFixed(0)}ms`,
+		`lookahead=${(lookahead * 1000).toFixed(0)}ms ping=${ping_ms.toFixed(0)}ms yaw=${observer.eye_yaw_degrees.toFixed(0)}deg`,
 		`observer origins=${origins.length} target points=${targets.points.length} segments=${origins.length * targets.points.length}`,
 		`blocked=${blocked_count}/${k_visibility_ray_count} hidden=${hidden ? "yes" : "no"}`,
 		`target inflated box min=(${format_vec(targets.box.min)})`,
@@ -866,9 +885,14 @@ function run_self_checks()
 	expect(Math.abs(effective_lookahead_seconds(0) - 0.2) < 1.0e-6, "0 ping lookahead");
 	expect(Math.abs(effective_lookahead_seconds(50) - 0.3) < 1.0e-6, "50 ping lookahead");
 	expect(Math.abs(effective_lookahead_seconds(150) - 0.5) < 1.0e-6, "150 ping lookahead clamp");
-	expect(visibility_origins(null, {eye: vec3(), velocity: vec3(250, 0, 0)}, 0.2).length === 6, "origin count");
+	const origins_yaw0 = visibility_origins(null, {eye: vec3(), velocity: vec3(250, 0, 0), eye_yaw_degrees: 0}, 0.2);
+	const origins_yaw90 = visibility_origins(null, {eye: vec3(), velocity: vec3(), eye_yaw_degrees: 90}, 0.2);
+	expect(origins_yaw0.length === 10, "origin count");
+	expect(Math.abs(origins_yaw0[2].y - 24) < 1.0e-6 && Math.abs(origins_yaw0[3].y + 24) < 1.0e-6, "yaw 0 shoulders");
+	expect(Math.abs(origins_yaw90[2].x + 24) < 1.0e-6 && Math.abs(origins_yaw90[3].x - 24) < 1.0e-6, "yaw 90 shoulders");
+	expect(Math.abs(origins_yaw0[6].z - 24) < 1.0e-6 && Math.abs(origins_yaw0[7].z + 24) < 1.0e-6, "vertical origins");
 	expect(visibility_targets(null, {origin: vec3(), velocity: vec3(0, 0, 0), mins: vec3(-16, -16, 0), maxs: vec3(16, 16, 72)}, 0.2).points.length === 16, "target count");
-	expect(k_visibility_ray_count === 96, "ray count");
+	expect(k_visibility_ray_count === 160, "ray count");
 	expect(hit_triangle(vec3(0.25, 0.25, 1), vec3(0, 0, -2), vec3(0, 0, 0), vec3(1, 0, 0), vec3(0, 1, 0)) !== null, "single triangle hit");
 
 	const element = $("self-check");

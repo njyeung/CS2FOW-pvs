@@ -1,6 +1,9 @@
 // Update these values when CS2 changes the corresponding engine layouts.
 recipient_slot_offset_windows=576
 recipient_slot_offset_linux=576
+checktransmit_aux_mask_offsets_windows=8,16,24
+checktransmit_aux_mask_offsets_linux=8,16,24
+checktransmit_full_update_offset_windows=580
+checktransmit_full_update_offset_linux=580
 game_entity_system_offset_windows=88
 game_entity_system_offset_linux=80
-

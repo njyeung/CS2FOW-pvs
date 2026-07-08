@@ -11,9 +11,11 @@ namespace
 constexpr float k_max_prediction_speed = 500.0f;
 constexpr float k_min_prediction_speed = 1.0f;
 constexpr float k_bounds_inflate = 16.0f;
-constexpr float k_vertical_origin_offset = 32.0f;
+constexpr float k_shoulder_origin_offset = 24.0f;
+constexpr float k_vertical_origin_offset = 24.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
 constexpr float k_rtt_lookahead_scale = 2.0f;
+constexpr float k_degrees_to_radians = 0.017453292519943295769f;
 
 float distance_sq(vec3 a, vec3 b)
 {
@@ -26,6 +28,22 @@ float distance_sq(vec3 a, vec3 b)
 vec3 add(vec3 a, vec3 b)
 {
 	return {a.x + b.x, a.y + b.y, a.z + b.z};
+}
+
+vec3 scale(vec3 value, float amount)
+{
+	return {value.x * amount, value.y * amount, value.z * amount};
+}
+
+vec3 subtract(vec3 a, vec3 b)
+{
+	return {a.x - b.x, a.y - b.y, a.z - b.z};
+}
+
+vec3 eye_right(float yaw_degrees)
+{
+	const float yaw = yaw_degrees * k_degrees_to_radians;
+	return {std::sin(yaw), -std::cos(yaw), 0.0f};
 }
 
 bounds player_bounds(const visibility_player &player, vec3 origin)
@@ -99,13 +117,23 @@ vec3 visibility_prediction_offset(vec3 velocity, float seconds, float peek_margi
 std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player, const visibility_tuning &tuning, float lookahead_seconds)
 {
 	const vec3 predicted = add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds, tuning.peek_margin_units));
-	const vec3 up {player.eye.x, player.eye.y, player.eye.z + k_vertical_origin_offset};
-	const vec3 down {player.eye.x, player.eye.y, player.eye.z - k_vertical_origin_offset};
-	const vec3 predicted_up {predicted.x, predicted.y, predicted.z + k_vertical_origin_offset};
-	const vec3 predicted_down {predicted.x, predicted.y, predicted.z - k_vertical_origin_offset};
+	const vec3 shoulder = scale(eye_right(player.eye_yaw_degrees), k_shoulder_origin_offset);
+	const vec3 left = subtract(player.eye, shoulder);
+	const vec3 right = add(player.eye, shoulder);
+	const vec3 predicted_left = subtract(predicted, shoulder);
+	const vec3 predicted_right = add(predicted, shoulder);
+	const vec3 vertical {0.0f, 0.0f, k_vertical_origin_offset};
+	const vec3 up = add(player.eye, vertical);
+	const vec3 down = subtract(player.eye, vertical);
+	const vec3 predicted_up = add(predicted, vertical);
+	const vec3 predicted_down = subtract(predicted, vertical);
 	return {
 		player.eye,
 		safe_origin(data, player.eye, predicted),
+		safe_origin(data, player.eye, left),
+		safe_origin(data, player.eye, right),
+		safe_origin(data, player.eye, predicted_left),
+		safe_origin(data, player.eye, predicted_right),
 		safe_origin(data, player.eye, up),
 		safe_origin(data, player.eye, down),
 		safe_origin(data, player.eye, predicted_up),

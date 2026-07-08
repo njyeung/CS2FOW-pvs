@@ -2,6 +2,7 @@
 #include "lifecycle_guard.h"
 #include "map_source.h"
 #include "subprocess.h"
+#include "transmit_masks.h"
 #include "vpk.h"
 #include "visibility_sampling.h"
 
@@ -78,6 +79,7 @@ struct schema_offsets
 	uint32_t view_x {};
 	uint32_t view_y {};
 	uint32_t view_z {};
+	uint32_t eye_angles {};
 	uint32_t collision {};
 	uint32_t mins {};
 	uint32_t maxs {};
@@ -103,6 +105,7 @@ struct player_state
 	vec3 velocity;
 	vec3 mins;
 	vec3 maxs;
+	float eye_yaw_degrees {};
 	float rtt_seconds {};
 	int pawn_entity {-1};
 };
@@ -143,6 +146,13 @@ struct visibility_result
 	uint32_t evaluated_pairs {};
 	uint32_t visible_pairs {};
 	uint32_t hidden_pairs {};
+};
+
+struct qangle
+{
+	float x {};
+	float y {};
+	float z {};
 };
 
 struct worker_stats
@@ -291,7 +301,7 @@ public:
 private:
 	static visibility_player sample_player(const player_state &player)
 	{
-		return {player.eye, player.origin, player.velocity, player.mins, player.maxs, player.rtt_seconds};
+		return {player.eye, player.origin, player.velocity, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds};
 	}
 
 	void run()
@@ -586,7 +596,7 @@ private:
 	lifecycle_key player_lifecycle(uint32_t slot, CGameEntitySystem *system, live_player *live) const;
 	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
 	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
-	void clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
+	void clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const;
 	void reset_transmit_state();
 	bool capture(snapshot &value);
 
@@ -601,6 +611,7 @@ private:
 	schema_offsets fields_;
 	uint32_t recipient_slot_offset_ {};
 	uint32_t entity_system_offset_ {};
+	checktransmit_private_offsets transmit_offsets_;
 	int game_frame_hook_id_ {};
 	int check_transmit_hook_id_ {};
 	std::string map_;
@@ -719,12 +730,17 @@ bool plugin::read_gamedata(std::string &error)
 	}
 	recipient_slot_offset_ = 0;
 	entity_system_offset_ = 0;
+	transmit_offsets_ = {};
 #if defined(_WIN32)
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_windows";
+	constexpr std::string_view k_aux_masks_key = "checktransmit_aux_mask_offsets_windows";
+	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_windows";
 #else
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
 	constexpr std::string_view k_entity_system_key = "game_entity_system_offset_linux";
+	constexpr std::string_view k_aux_masks_key = "checktransmit_aux_mask_offsets_linux";
+	constexpr std::string_view k_full_update_key = "checktransmit_full_update_offset_linux";
 #endif
 	std::string line;
 	while (std::getline(stream, line))
@@ -735,30 +751,40 @@ bool plugin::read_gamedata(std::string &error)
 			continue;
 		}
 		const std::string key = line.substr(0, equals);
-		if (key != k_recipient_key && key != k_entity_system_key)
+		if (key != k_recipient_key && key != k_entity_system_key && key != k_aux_masks_key && key != k_full_update_key)
 		{
 			continue;
 		}
 		std::string_view text(line.data() + equals + 1u, line.size() - equals - 1u);
-		while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.remove_prefix(1);
-		while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.remove_suffix(1);
+		if (key == k_aux_masks_key)
+		{
+			if (!parse_checktransmit_aux_mask_offsets(text, transmit_offsets_.aux_mask_offsets, k_max_gamedata_offset))
+			{
+				error = "invalid gamedata value for " + key;
+				return false;
+			}
+			continue;
+		}
 		uint32_t value {};
-		const auto [end, conversion_error] = std::from_chars(text.data(), text.data() + text.size(), value);
-		if (text.empty() || conversion_error != std::errc {} || end != text.data() + text.size())
+		if (!parse_gamedata_uint32(text, value))
 		{
 			error = "invalid gamedata value for " + key;
 			return false;
 		}
 		if (key == k_recipient_key) recipient_slot_offset_ = value;
 		if (key == k_entity_system_key) entity_system_offset_ = value;
+		if (key == k_full_update_key) transmit_offsets_.full_update_offset = value;
 	}
-	if (recipient_slot_offset_ == 0 || entity_system_offset_ == 0)
+	const bool aux_offsets_valid = std::all_of(transmit_offsets_.aux_mask_offsets.begin(), transmit_offsets_.aux_mask_offsets.end(),
+		[](uint32_t offset) { return offset != 0; });
+	if (recipient_slot_offset_ == 0 || entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0 || !aux_offsets_valid)
 	{
 		error = "gamedata does not contain this platform's required offsets";
 		return false;
 	}
 	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo) || recipient_slot_offset_ > k_max_gamedata_offset || recipient_slot_offset_ % alignof(int) != 0
-		|| entity_system_offset_ < sizeof(void *) || entity_system_offset_ > k_max_gamedata_offset || entity_system_offset_ % alignof(void *) != 0)
+		|| entity_system_offset_ < sizeof(void *) || entity_system_offset_ > k_max_gamedata_offset || entity_system_offset_ % alignof(void *) != 0
+		|| !valid_gamedata_offset(transmit_offsets_.full_update_offset, static_cast<uint32_t>(alignof(bool)), k_max_gamedata_offset))
 	{
 		error = "gamedata contains invalid offsets for this platform";
 		return false;
@@ -797,6 +823,7 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.view_x, "CNetworkViewOffsetVector", "m_vecX");
 	require(fields_.view_y, "CNetworkViewOffsetVector", "m_vecY");
 	require(fields_.view_z, "CNetworkViewOffsetVector", "m_vecZ");
+	require(fields_.eye_angles, "CCSPlayerPawn", "m_angEyeAngles");
 	require(fields_.collision, "CBaseEntity", "m_pCollision");
 	require(fields_.mins, "CCollisionProperty", "m_vecMins");
 	require(fields_.maxs, "CCollisionProperty", "m_vecMaxs");
@@ -961,20 +988,15 @@ bool plugin::group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *
 	});
 }
 
-void plugin::clear_group(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const
+void plugin::clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const
 {
-	if (bits == nullptr)
+	if (masks.count == 0)
 	{
 		return;
 	}
-	for (size_t entity = 0; entity < group.count; ++entity)
-	{
-		const int index = resolve_entity_index(system, group.handles[entity]);
-		if (valid_entity_index(index))
-		{
-			bits->Clear(index);
-		}
-	}
+	clear_transmit_group(masks, group.handles, group.count,
+		[&](CEntityHandle handle) { return resolve_entity_index(system, handle); },
+		[](int index) { return valid_entity_index(index); });
 }
 
 void plugin::disable(std::string reason)
@@ -1216,6 +1238,7 @@ bool plugin::capture(snapshot &value)
 		player.maxs = to_vec3(field<Vector>(collision, fields_.maxs));
 		void *view = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pawn_entity) + fields_.view_offset);
 		player.eye = {player.origin.x + field<float>(view, fields_.view_x), player.origin.y + field<float>(view, fields_.view_y), player.origin.z + field<float>(view, fields_.view_z)};
+		player.eye_yaw_degrees = field<qangle>(pawn_entity, fields_.eye_angles).y;
 		if (INetChannelInfo *channel = engine_->GetPlayerNetInfo(CPlayerSlot(static_cast<int>(slot))); channel != nullptr)
 		{
 			player.rtt_seconds = std::max(0.0f, channel->GetEngineLatency());
@@ -1311,6 +1334,15 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		{
 			continue;
 		}
+		if (read_checktransmit_full_update(info, transmit_offsets_.full_update_offset))
+		{
+			continue;
+		}
+		transmit_masks<CBitVec<MAX_EDICTS>> masks;
+		if (!collect_transmit_masks(info, info->m_pTransmitEntity, transmit_offsets_.aux_mask_offsets, masks))
+		{
+			continue;
+		}
 		int slot = -1;
 		std::memcpy(&slot, reinterpret_cast<const char *>(info) + recipient_slot_offset_, sizeof(slot));
 		if (slot < 0 || slot >= static_cast<int>(k_max_players) || !result->players[slot].valid)
@@ -1334,7 +1366,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					clear_group(system, info->m_pTransmitEntity, stored_group);
+					clear_group(system, masks, stored_group);
 				}
 				continue;
 			}
@@ -1343,14 +1375,14 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					clear_group(system, info->m_pTransmitEntity, stored_group);
+					clear_group(system, masks, stored_group);
 				}
 				continue;
 			}
 			pair_guard &guard = pair_guards_[slot][target];
 			visual_entity_group current_group;
 			const bool current_group_valid = collect_player_visual_group(system, current_pawn, current_group);
-			const bool full_group_marked = current_group_valid && group_fully_marked(system, info->m_pTransmitEntity, current_group);
+			const bool full_group_marked = current_group_valid && group_fully_marked(system, masks.primary, current_group);
 			if (current_group_valid)
 			{
 				update_pair_visual_group(guard, make_current_visual_group_key(current_group), now, k_pair_baseline_warmup);
@@ -1377,12 +1409,12 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				if (hidden_group_quarantined(stored_group, now))
 				{
-					clear_group(system, info->m_pTransmitEntity, stored_group);
+					clear_group(system, masks, stored_group);
 				}
 				continue;
 			}
 			hidden_group_store(stored_group, current_group.source, current_group.handles, current_group.count, now, k_hidden_entity_quarantine);
-			clear_group(system, info->m_pTransmitEntity, current_group);
+			clear_group(system, masks, current_group);
 		}
 	}
 }

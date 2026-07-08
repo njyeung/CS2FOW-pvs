@@ -1,6 +1,6 @@
 # CS2FOW Debug Viewer
 
-Local-only viewer for CS2FOW visibility sampling. It renders exported CS2 player models as reference, then overlays the collision box, sample points, prediction envelope, 96 visibility segments, and optional `.bvh8` blocking.
+Local-only viewer for CS2FOW visibility sampling. It renders exported CS2 player models as reference, then overlays the collision box, sample points, prediction envelope, 160 visibility segments, and optional `.bvh8` blocking.
 
 Valve model exports are local assets. Do not commit them.
 
@@ -35,4 +35,4 @@ Use the BVH8 file picker to load a bake such as:
 data/maps/de_mirage.bvh8
 ```
 
-The viewer uses the current CS2FOW constants: `200ms + ping * 2`, `500ms` cap, `96u` peek margin, `16u` target inflation, and `32z` observer vertical offset.
+The viewer uses the current CS2FOW constants: `200ms + ping * 2`, `500ms` cap, `96u` peek margin, `16u` target inflation, `24u` observer shoulder offset from yaw, and `24u` vertical observer offset.

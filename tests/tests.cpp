@@ -3,6 +3,7 @@
 #include "lifecycle_guard.h"
 #include "map_source.h"
 #include "subprocess.h"
+#include "transmit_masks.h"
 #include "visibility_sampling.h"
 #include "vpk.h"
 
@@ -207,6 +208,26 @@ visual_group_key test_visual_key(std::initializer_list<uint32_t> handles)
 	return make_visual_group_key(values, count);
 }
 
+struct test_transmit_mask
+{
+	std::array<bool, 64> bits {};
+
+	void Set(int index)
+	{
+		bits[static_cast<size_t>(index)] = true;
+	}
+
+	void Clear(int index)
+	{
+		bits[static_cast<size_t>(index)] = false;
+	}
+
+	bool IsBitSet(int index) const
+	{
+		return bits[static_cast<size_t>(index)];
+	}
+};
+
 void test_visibility_sampling()
 {
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
@@ -228,7 +249,24 @@ void test_visibility_sampling()
 
 	player.velocity = {100, 0, 0};
 	auto origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
+	assert(k_visibility_origin_count == 10);
+	assert(k_visibility_ray_count == 160);
 	assert(std::fabs(origins[1].x - 96.0f) < 0.01f && origins[1].y == 0.0f);
+	assert(std::fabs(origins[2].y - 24.0f) < 0.01f);
+	assert(std::fabs(origins[3].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins[4].x - 96.0f) < 0.01f && std::fabs(origins[4].y - 24.0f) < 0.01f);
+	assert(std::fabs(origins[5].x - 96.0f) < 0.01f && std::fabs(origins[5].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins[6].z - 24.0f) < 0.01f);
+	assert(std::fabs(origins[7].z + 24.0f) < 0.01f);
+	assert(std::fabs(origins[8].x - 96.0f) < 0.01f && std::fabs(origins[8].z - 24.0f) < 0.01f);
+	assert(std::fabs(origins[9].x - 96.0f) < 0.01f && std::fabs(origins[9].z + 24.0f) < 0.01f);
+
+	player.velocity = {};
+	player.eye_yaw_degrees = 90.0f;
+	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
+	assert(std::fabs(origins[2].x + 24.0f) < 0.01f);
+	assert(std::fabs(origins[3].x - 24.0f) < 0.01f);
+	player.eye_yaw_degrees = 0.0f;
 
 	player.velocity = {0, 10, 0};
 	origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
@@ -250,6 +288,23 @@ void test_visibility_sampling()
 	player.velocity = {10, 0, 0};
 	origins = visibility_origins(wall, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
 	assert(origins[1].x == player.eye.x && origins[1].y == player.eye.y && origins[1].z == player.eye.z);
+	assert(origins[8].x == player.eye.x && origins[8].y == player.eye.y && origins[8].z == player.eye.z);
+	assert(origins[9].x == player.eye.x && origins[9].y == player.eye.y && origins[9].z == player.eye.z);
+
+	const bvh8_data side_wall = test_world({
+		{{-100, -8, -100}, {100, -8, -100}, {-100, -8, 100}},
+		{{100, -8, 100}, {-100, -8, 100}, {100, -8, -100}}
+	});
+	player.velocity = {};
+	origins = visibility_origins(side_wall, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
+	assert(origins[3].x == player.eye.x && origins[3].y == player.eye.y && origins[3].z == player.eye.z);
+
+	const bvh8_data ceiling = test_world({
+		{{-100, -100, 8}, {100, -100, 8}, {-100, 100, 8}},
+		{{100, 100, 8}, {-100, 100, 8}, {100, -100, 8}}
+	});
+	origins = visibility_origins(ceiling, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
+	assert(origins[6].x == player.eye.x && origins[6].y == player.eye.y && origins[6].z == player.eye.z);
 
 	visibility_player target {};
 	target.origin = {0, 0, 0};
@@ -371,6 +426,78 @@ void test_pair_guard()
 	pair_note_open(guard, start + std::chrono::milliseconds(7500), 7);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 7));
 	assert(pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 8));
+}
+
+void test_checktransmit_private_offsets()
+{
+	std::array<uint32_t, k_checktransmit_aux_mask_count> offsets {};
+	assert(parse_checktransmit_aux_mask_offsets("8,16,24", offsets, 4096));
+	assert(offsets[0] == 8 && offsets[1] == 16 && offsets[2] == 24);
+	assert(parse_checktransmit_aux_mask_offsets(" 8, 16, 24 ", offsets, 4096));
+	assert(!parse_checktransmit_aux_mask_offsets("8,16", offsets, 4096));
+	assert(!parse_checktransmit_aux_mask_offsets("8,16,24,32", offsets, 4096));
+	assert(!parse_checktransmit_aux_mask_offsets("8,8,24", offsets, 4096));
+	assert(!parse_checktransmit_aux_mask_offsets("8,18,24", offsets, 4096));
+	assert(!parse_checktransmit_aux_mask_offsets("8,16,999999", offsets, 4096));
+	assert(!parse_checktransmit_aux_mask_offsets("8,16,", offsets, 4096));
+
+	uint32_t value {};
+	assert(parse_gamedata_uint32(" 580 ", value) && value == 580);
+	assert(!parse_gamedata_uint32("580x", value));
+	assert(valid_gamedata_offset(580, alignof(bool), 4096));
+	assert(!valid_gamedata_offset(0, alignof(void *), 4096));
+}
+
+void test_checktransmit_masks()
+{
+	struct fake_info
+	{
+		test_transmit_mask *primary;
+		test_transmit_mask *aux1;
+		test_transmit_mask *aux2;
+		test_transmit_mask *aux3;
+		bool full_update;
+	};
+
+	test_transmit_mask primary;
+	test_transmit_mask aux1;
+	test_transmit_mask aux2;
+	test_transmit_mask aux3;
+	fake_info info {&primary, &aux1, &aux2, &aux3, false};
+	transmit_masks<test_transmit_mask> masks;
+	const std::array<uint32_t, k_checktransmit_aux_mask_count> offsets {8, 16, 24};
+	assert(collect_transmit_masks(&info, info.primary, offsets, masks));
+	assert(masks.primary == &primary);
+	assert(masks.count == 4);
+	assert(!read_checktransmit_full_update(&info, 32));
+	info.full_update = true;
+	assert(read_checktransmit_full_update(&info, 32));
+	info.full_update = false;
+
+	for (test_transmit_mask *mask : {&primary, &aux1, &aux2, &aux3})
+	{
+		mask->Set(10);
+		mask->Set(20);
+		mask->Set(30);
+	}
+	const std::array<int, 3> handles {10, 20, 30};
+	clear_transmit_group(masks, handles, handles.size(), [](int handle) { return handle; }, [](int index) { return index >= 0 && index < 64; });
+	for (test_transmit_mask *mask : {&primary, &aux1, &aux2, &aux3})
+	{
+		assert(!mask->IsBitSet(10));
+		assert(!mask->IsBitSet(20));
+		assert(!mask->IsBitSet(30));
+	}
+
+	info.aux2 = &aux1;
+	assert(collect_transmit_masks(&info, info.primary, offsets, masks));
+	assert(masks.count == 3);
+
+	info.aux2 = nullptr;
+	assert(!collect_transmit_masks(&info, info.primary, offsets, masks));
+
+	info.aux2 = reinterpret_cast<test_transmit_mask *>(reinterpret_cast<uintptr_t>(&aux2) + 1u);
+	assert(!collect_transmit_masks(&info, info.primary, offsets, masks));
 }
 
 void test_hidden_entity_group()
@@ -543,6 +670,8 @@ int main(int argc, char **argv)
 	test_lifecycle_guard();
 	test_visual_group_key();
 	test_pair_guard();
+	test_checktransmit_private_offsets();
+	test_checktransmit_masks();
 	test_hidden_entity_group();
 	test_bvh(directory);
 	std::filesystem::remove_all(directory);

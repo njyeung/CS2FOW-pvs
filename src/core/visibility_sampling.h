@@ -8,7 +8,7 @@
 namespace cs2fow
 {
 
-inline constexpr uint32_t k_visibility_origin_count = 6;
+inline constexpr uint32_t k_visibility_origin_count = 10;
 inline constexpr uint32_t k_visibility_target_count = 16;
 inline constexpr uint32_t k_visibility_ray_count = k_visibility_origin_count * k_visibility_target_count;
 
@@ -19,6 +19,7 @@ struct visibility_player
 	vec3 velocity;
 	vec3 mins;
 	vec3 maxs;
+	float eye_yaw_degrees {};
 	float rtt_seconds {};
 };
 
