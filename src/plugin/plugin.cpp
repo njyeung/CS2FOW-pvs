@@ -266,7 +266,7 @@ CEntityHandle entity_handle(CEntityInstance *entity)
 	return entity != nullptr && entity->m_pEntity != nullptr ? entity->m_pEntity->GetRefEHandle() : CEntityHandle {};
 }
 
-bool valid_entity_index(int index)
+bool valid_networked_edict_index(int index)
 {
 	return index > 0 && index < MAX_EDICTS;
 }
@@ -668,6 +668,7 @@ private:
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
+	std::mutex transmit_state_mutex_;
 	std::chrono::steady_clock::time_point last_snapshot_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
@@ -947,7 +948,7 @@ lifecycle_key plugin::player_lifecycle(uint32_t slot, CGameEntitySystem *system,
 	CEntityInstance *pawn_entity = pawn(controller_entity);
 	CEntityInstance *pawn_controller = pawn_entity == nullptr ? nullptr : system->GetEntityInstance(field<CEntityHandle>(pawn_entity, fields_.pawn_controller));
 	key.pawn_entity = entity_index(pawn_entity);
-	if (pawn_entity == nullptr || pawn_controller != controller_entity || !valid_entity_index(key.pawn_entity))
+	if (pawn_entity == nullptr || pawn_controller != controller_entity || !valid_networked_edict_index(key.pawn_entity))
 	{
 		return key;
 	}
@@ -1008,7 +1009,7 @@ bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInsta
 		{
 			return true;
 		}
-		if (!valid_entity_index(resolve_entity_index(system, handle)) || group.count >= group.handles.size())
+		if (!valid_networked_edict_index(resolve_entity_index(system, handle)) || group.count >= group.handles.size())
 		{
 			return false;
 		}
@@ -1061,7 +1062,7 @@ bool plugin::group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *
 	return hidden_group_all_of(group, [&](CEntityHandle handle)
 	{
 		const int index = resolve_entity_index(system, handle);
-		return valid_entity_index(index) && bits->IsBitSet(index);
+		return valid_networked_edict_index(index) && bits->IsBitSet(index);
 	});
 }
 
@@ -1073,7 +1074,7 @@ void plugin::clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec
 	}
 	clear_transmit_group(masks, group.handles, group.count,
 		[&](CEntityHandle handle) { return resolve_entity_index(system, handle); },
-		[](int index) { return valid_entity_index(index); });
+		[](int index) { return valid_networked_edict_index(index); });
 }
 
 void plugin::disable(std::string reason)
@@ -1086,6 +1087,7 @@ void plugin::disable(std::string reason)
 
 void plugin::reset_transmit_state()
 {
+	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	for (lifecycle_guard &guard : lifecycle_)
 	{
 		guard = {};
@@ -1285,6 +1287,7 @@ bool plugin::capture(snapshot &value)
 	const auto now = value.captured;
 	std::array<lifecycle_key, k_max_players> keys;
 	std::array<bool, k_max_players> stable_slots {};
+	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	for (uint32_t slot = 0; slot < k_max_players; ++slot)
 	{
 		live_player live;
@@ -1394,6 +1397,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 	{
 		return;
 	}
+	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	const auto current_player_pawn = [&](uint32_t slot, const player_state &saved)
 	{
 		live_player live;
