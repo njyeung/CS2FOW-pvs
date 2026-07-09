@@ -1,10 +1,18 @@
-# CS2FOW Debug Viewer
+# CS2FOW LOS Point Editor
 
-Local-only viewer for CS2FOW visibility sampling. It renders exported CS2 player models as reference, then overlays the collision box, sample points, prediction envelope, 160 visibility segments, and optional `.bvh8` blocking.
+Local-only editor for tuning CS2FOW target LOS points against the exported CS2 SAS model.
 
-Valve model exports are local assets. Do not commit them.
+The editor shows:
 
-## Export Local Models
+- the local SAS GLB model
+- optional USP-S, M4A1-S, and AWP previews attached to the right hand
+- 8 generated collision AABB fallback points
+- 15 editable body LOS points
+- one dynamic weapon muzzle point when a weapon is selected
+
+It does not load maps, BVH8 files, rays, hit triangles, or runtime worker state. Valve model exports are local assets and must not be committed.
+
+## Export Local Assets
 
 ```powershell
 python tools/debug_viewer/export_assets.py --game "C:\Program Files (x86)\Steam\steamapps\common\Counter-Strike Global Offensive\game\csgo"
@@ -15,6 +23,8 @@ This writes ignored files under:
 ```text
 tools/debug_viewer/local_assets/
 ```
+
+The weapon preview and muzzle point are only for tuning and visual context. Use the Weapon Preview panel to choose a weapon and adjust its local position, rotation, and scale.
 
 ## Run
 
@@ -29,18 +39,15 @@ Open:
 http://127.0.0.1:8765/viewer.html
 ```
 
-Use the BVH8 file picker to load a bake such as:
+The editor exports only the ordered body-point preset:
 
-```text
-data/maps/de_mirage.bvh8
+```json
+{
+	"version": 1,
+	"coordinate_space": "source_local",
+	"model": "ctm_sas",
+	"points": []
+}
 ```
 
-Use the optional Map OBJ picker for visual context. The OBJ must come from a baker debug export, for example:
-
-```powershell
-tools\cs2fow_baker.exe --game "C:\Users\karola3vax\Desktop\server" --map de_mirage --debug-obj "%TEMP%\de_mirage.obj"
-```
-
-The OBJ is only drawn as a transparent wireframe. The loaded `.bvh8` still decides which rays are blocked.
-
-The viewer uses the current CS2FOW constants: `200ms + ping * 2`, `500ms` cap, speed-stepped `160u` maximum peek margin, `12u` target inflation, `24u` observer shoulder offset from yaw, and `24u` vertical observer offset.
+Runtime integration is intentionally separate. CS2FOW will later combine these body points with generated AABB fallback corners.

@@ -14,7 +14,9 @@ LOCAL_ASSETS = VIEWER / "local_assets"
 
 MODELS = {
     "ct_sas": "agents/models/ctm_sas/ctm_sas.vmdl_c",
-    "t_phoenix": "agents/models/tm_phoenix/tm_phoenix.vmdl_c",
+    "usp_silencer": "weapons/models/usp_silencer/weapon_pist_usp_silencer.vmdl_c",
+    "m4a1_silencer": "weapons/models/m4a1_silencer/weapon_rif_m4a1_silencer.vmdl_c",
+    "awp": "weapons/models/awp/weapon_snip_awp.vmdl_c",
 }
 
 
@@ -62,7 +64,7 @@ def export_model(vrf: Path, game: Path, key: str, resource: str) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Export local CS2 player GLBs for the CS2FOW debug viewer.")
+    parser = argparse.ArgumentParser(description="Export the local CS2 SAS GLB for the CS2FOW LOS point editor.")
     parser.add_argument("--game", required=True, type=Path, help="Path to game/csgo")
     parser.add_argument("--vrf", type=Path, default=default_vrf(), help="Path to Source2Viewer-CLI")
     args = parser.parse_args()
