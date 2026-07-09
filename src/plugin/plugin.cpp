@@ -87,6 +87,9 @@ struct schema_offsets
 	uint32_t weapons {};
 	uint32_t active_weapon {};
 	uint32_t last_weapon {};
+	uint32_t attribute_manager {};
+	uint32_t item {};
+	uint32_t item_definition_index {};
 	uint32_t wearables {};
 	uint32_t hostage_services {};
 	uint32_t is_spawning {};
@@ -107,6 +110,7 @@ struct player_state
 	vec3 maxs;
 	float eye_yaw_degrees {};
 	float rtt_seconds {};
+	weapon_muzzle_class muzzle_class {weapon_muzzle_class::none};
 	int pawn_entity {-1};
 };
 
@@ -195,6 +199,30 @@ uint32_t find_field_recursive(SchemaClassInfoData_t *class_info, const char *nam
 	return 0;
 }
 
+bool find_field_recursive(SchemaClassInfoData_t *class_info, const char *name, uint32_t &offset)
+{
+	if (class_info == nullptr)
+	{
+		return false;
+	}
+	for (int i = 0; i < class_info->m_nFieldCount; ++i)
+	{
+		if (std::strcmp(class_info->m_pFields[i].m_pszName, name) == 0)
+		{
+			offset = class_info->m_pFields[i].m_nSingleInheritanceOffset;
+			return true;
+		}
+	}
+	for (int i = 0; i < class_info->m_nBaseClassCount; ++i)
+	{
+		if (find_field_recursive(class_info->m_pBaseClasses[i].m_pClass, name, offset))
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
 uint32_t resolve_field(ISchemaSystem *schema, const char *class_name, const char *field_name)
 {
 #if defined(_WIN32)
@@ -207,6 +235,20 @@ uint32_t resolve_field(ISchemaSystem *schema, const char *class_name, const char
 		return 0;
 	}
 	return find_field_recursive(scope->FindDeclaredClass(class_name).Get(), field_name);
+}
+
+bool resolve_field(ISchemaSystem *schema, const char *class_name, const char *field_name, uint32_t &offset)
+{
+#if defined(_WIN32)
+	CSchemaSystemTypeScope *scope = schema->FindTypeScopeForModule("server.dll");
+#else
+	CSchemaSystemTypeScope *scope = schema->FindTypeScopeForModule("libserver.so");
+#endif
+	if (scope == nullptr)
+	{
+		return false;
+	}
+	return find_field_recursive(scope->FindDeclaredClass(class_name).Get(), field_name, offset);
 }
 
 vec3 to_vec3(const Vector &value)
@@ -301,7 +343,7 @@ public:
 private:
 	static visibility_player sample_player(const player_state &player)
 	{
-		return {player.eye, player.origin, player.velocity, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds};
+		return {player.eye, player.origin, player.velocity, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds, player.muzzle_class};
 	}
 
 	void run()
@@ -355,8 +397,9 @@ private:
 					uint32_t ray = 0;
 					for (const vec3 &origin : ray_origins)
 					{
-						for (const vec3 &point : ray_targets)
+						for (uint32_t point_index = 0; point_index < ray_targets.count; ++point_index)
 						{
+							const vec3 &point = ray_targets.points[point_index];
 							const ray_hit hit = segment_blocked(*data_, origin, point, cached_packets_[observer][target][ray]);
 							cached_packets_[observer][target][ray++] = hit.packet_index;
 							if (!hit.blocked)
@@ -405,7 +448,7 @@ private:
 	visibility_tuning tuning_;
 	std::thread thread_;
 	std::shared_ptr<const visibility_result> published_;
-	std::array<std::array<std::array<uint32_t, k_visibility_ray_count>, k_max_players>, k_max_players> cached_packets_ {};
+	std::array<std::array<std::array<uint32_t, k_visibility_ray_count_max>, k_max_players>, k_max_players> cached_packets_ {};
 	std::array<std::array<std::chrono::steady_clock::time_point, k_max_players>, k_max_players> revealed_until_ {};
 	mutable std::mutex stats_mutex_;
 	worker_stats stats_;
@@ -594,6 +637,7 @@ private:
 	CEntityInstance *controller(uint32_t slot) const;
 	CEntityInstance *pawn(CEntityInstance *controller) const;
 	lifecycle_key player_lifecycle(uint32_t slot, CGameEntitySystem *system, live_player *live) const;
+	weapon_muzzle_class active_weapon_muzzle_class(CGameEntitySystem *system, CEntityInstance *pawn) const;
 	bool collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn, visual_entity_group &group) const;
 	bool group_fully_marked(CGameEntitySystem *system, CBitVec<MAX_EDICTS> *bits, const visual_entity_group &group) const;
 	void clear_group(CGameEntitySystem *system, const transmit_masks<CBitVec<MAX_EDICTS>> &masks, const visual_entity_group &group) const;
@@ -620,6 +664,7 @@ private:
 	bvh8_data data_;
 	visibility_worker worker_;
 	automatic_baker automatic_baker_;
+	bool weapon_item_schema_available_ {};
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
 	std::array<std::array<pair_guard, k_max_players>, k_max_players> pair_guards_;
 	std::array<std::array<visual_entity_group, k_max_players>, k_max_players> hidden_groups_;
@@ -808,6 +853,10 @@ bool plugin::resolve_schema(std::string &error)
 			error += field_name;
 		}
 	};
+	auto optional = [&](uint32_t &target, const char *class_name, const char *field_name)
+	{
+		return resolve_field(schema_, class_name, field_name, target);
+	};
 	require(fields_.is_hltv, "CBasePlayerController", "m_bIsHLTV");
 	require(fields_.player_pawn, "CCSPlayerController", "m_hPlayerPawn");
 	require(fields_.pawn_controller, "CBasePlayerPawn", "m_hController");
@@ -831,6 +880,10 @@ bool plugin::resolve_schema(std::string &error)
 	require(fields_.weapons, "CPlayer_WeaponServices", "m_hMyWeapons");
 	require(fields_.active_weapon, "CPlayer_WeaponServices", "m_hActiveWeapon");
 	require(fields_.last_weapon, "CPlayer_WeaponServices", "m_hLastWeapon");
+	const bool weapon_item_schema_available =
+		optional(fields_.attribute_manager, "CEconEntity", "m_AttributeManager")
+		&& optional(fields_.item, "CAttributeContainer", "m_Item")
+		&& optional(fields_.item_definition_index, "CEconItemView", "m_iItemDefinitionIndex");
 	require(fields_.wearables, "CBaseCombatCharacter", "m_hMyWearables");
 	require(fields_.hostage_services, "CCSPlayerPawn", "m_pHostageServices");
 	require(fields_.is_spawning, "CCSPlayerPawn", "m_bIsSpawning");
@@ -843,6 +896,7 @@ bool plugin::resolve_schema(std::string &error)
 		error = "missing schema fields: " + error;
 		return false;
 	}
+	weapon_item_schema_available_ = weapon_item_schema_available;
 	return true;
 }
 
@@ -911,6 +965,29 @@ lifecycle_key plugin::player_lifecycle(uint32_t slot, CGameEntitySystem *system,
 		live->team = key.team;
 	}
 	return key;
+}
+
+weapon_muzzle_class plugin::active_weapon_muzzle_class(CGameEntitySystem *system, CEntityInstance *pawn_entity) const
+{
+	if (system == nullptr || pawn_entity == nullptr || !weapon_item_schema_available_)
+	{
+		return weapon_muzzle_class::none;
+	}
+	void *services = field<void *>(pawn_entity, fields_.weapon_services);
+	if (services == nullptr)
+	{
+		return weapon_muzzle_class::none;
+	}
+	const CEntityHandle active_weapon = field<CEntityHandle>(services, fields_.active_weapon);
+	CEntityInstance *weapon = active_weapon.IsValid() ? system->GetEntityInstance(active_weapon) : nullptr;
+	if (weapon == nullptr)
+	{
+		return weapon_muzzle_class::none;
+	}
+	void *attribute_manager = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(weapon) + fields_.attribute_manager);
+	void *item = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(attribute_manager) + fields_.item);
+	const uint16_t definition = field<uint16_t>(item, fields_.item_definition_index);
+	return weapon_muzzle_class_from_item_definition(definition);
 }
 
 bool plugin::collect_player_visual_group(CGameEntitySystem *system, CEntityInstance *pawn_entity, visual_entity_group &group) const
@@ -1239,6 +1316,7 @@ bool plugin::capture(snapshot &value)
 		void *view = reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(pawn_entity) + fields_.view_offset);
 		player.eye = {player.origin.x + field<float>(view, fields_.view_x), player.origin.y + field<float>(view, fields_.view_y), player.origin.z + field<float>(view, fields_.view_z)};
 		player.eye_yaw_degrees = field<qangle>(pawn_entity, fields_.eye_angles).y;
+		player.muzzle_class = active_weapon_muzzle_class(system, pawn_entity);
 		if (INetChannelInfo *channel = engine_->GetPlayerNetInfo(CPlayerSlot(static_cast<int>(slot))); channel != nullptr)
 		{
 			player.rtt_seconds = std::max(0.0f, channel->GetEngineLatency());

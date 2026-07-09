@@ -1,104 +1,212 @@
 <!doctype html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" href="data:,">
-    <title>CS2FOW Debug Viewer</title>
-    <style>
-        :root { color-scheme: dark; font-family: Segoe UI, Arial, sans-serif; }
-        body { margin: 0; background: #0b0e12; color: #e8eef7; overflow: hidden; }
-        #view { position: fixed; inset: 0; }
-        #panel {
-            position: fixed; top: 12px; left: 12px; width: 360px; max-height: calc(100vh - 24px);
-            overflow: auto; background: rgba(11, 14, 18, .92); border: 1px solid #2c3440;
-            border-radius: 6px; padding: 12px; box-sizing: border-box;
-        }
-        h1 { font-size: 18px; margin: 0 0 10px; }
-        fieldset { border: 1px solid #2c3440; border-radius: 6px; margin: 10px 0; padding: 10px; }
-        legend { color: #9db6d8; padding: 0 5px; }
-        label { display: grid; grid-template-columns: 120px 1fr; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
-        input, select, button { background: #151b23; color: #e8eef7; border: 1px solid #3a4656; border-radius: 4px; padding: 5px; }
-        input[type="file"] { width: 100%; }
-        button { cursor: pointer; }
-        .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-        .row label { display: block; margin: 0; }
-        .row input { width: 100%; box-sizing: border-box; }
-        .status { white-space: pre-wrap; font: 12px Consolas, monospace; color: #bdd2ef; }
-        .ok { color: #7ee787; }
-        .bad { color: #ff7b72; }
-        .hint { color: #9da7b3; font-size: 12px; line-height: 1.35; }
-    </style>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="icon" href="data:,">
+	<title>CS2FOW LOS Point Editor</title>
+	<style>
+		:root {
+			color-scheme: dark;
+			font-family: Segoe UI, Arial, sans-serif;
+			background: #0b0e12;
+			color: #f4f7fb;
+		}
+		* {
+			box-sizing: border-box;
+		}
+		body {
+			margin: 0;
+			overflow: hidden;
+		}
+		#view {
+			display: block;
+			width: 100vw;
+			height: 100vh;
+		}
+		.panel {
+			position: fixed;
+			inset: 16px 16px 16px auto;
+			width: min(390px, calc(100vw - 32px));
+			overflow: auto;
+			padding: 12px;
+			border: 1px solid #2b3442;
+			background: rgba(12, 16, 22, 0.94);
+		}
+		h1 {
+			margin: 0 0 8px;
+			font-size: 20px;
+			letter-spacing: 0;
+		}
+		fieldset {
+			margin: 0 0 10px;
+			padding: 9px;
+			border: 1px solid #303a48;
+		}
+		legend {
+			padding: 0 6px;
+			font-weight: 700;
+		}
+		label {
+			display: block;
+			margin: 8px 0;
+			font-size: 13px;
+			color: #cbd5e1;
+		}
+		input, button {
+			font: inherit;
+		}
+		input[type="number"], input[type="range"] {
+			width: 100%;
+		}
+		input[type="file"] {
+			width: 100%;
+		}
+		.hidden-file {
+			display: none;
+		}
+		button {
+			min-height: 32px;
+			border: 1px solid #435064;
+			background: #17202b;
+			color: #f4f7fb;
+			cursor: pointer;
+		}
+		button:hover {
+			background: #223043;
+		}
+		.row {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 8px;
+		}
+		.actions {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 8px;
+		}
+		.actions.compact {
+			grid-template-columns: repeat(2, 1fr);
+		}
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			font-size: 12px;
+		}
+		th, td {
+			border-bottom: 1px solid #242d38;
+			padding: 5px;
+			text-align: left;
+		}
+		tr.selected {
+			background: #233247;
+		}
+		td input {
+			width: 70px;
+			border: 1px solid #384557;
+			background: #0f151d;
+			color: #f4f7fb;
+		}
+		.status {
+			white-space: pre-wrap;
+			color: #9fb1c7;
+			font-size: 12px;
+			line-height: 1.45;
+		}
+		.ok {
+			color: #79d986;
+		}
+		.bad {
+			color: #ff7777;
+		}
+		.hint {
+			color: #94a3b8;
+			font-size: 12px;
+			line-height: 1.45;
+		}
+	</style>
 </head>
 <body>
-<canvas id="view"></canvas>
-<aside id="panel">
-    <h1>CS2FOW Debug Viewer</h1>
-    <div id="self-check" class="status">self-check: pending</div>
+	<canvas id="view"></canvas>
+	<section class="panel">
+		<h1>CS2FOW LOS Point Editor</h1>
+		<div id="self-check" class="status">self-check: running...</div>
 
-    <fieldset>
-        <legend>Assets</legend>
-        <label>Model
-            <select id="model-select">
-                <option value="ct_sas">CT SAS</option>
-                <option value="t_phoenix">T Phoenix</option>
-            </select>
-        </label>
-        <label>Animation <select id="animation-select"><option value="">none</option></select></label>
-        <div class="hint">Run <code>export_assets.py</code> first, or load GLBs manually.</div>
-        <label>CT GLB <input id="ct-file" type="file" accept=".glb,.gltf"></label>
-        <label>T GLB <input id="t-file" type="file" accept=".glb,.gltf"></label>
-        <label>BVH8 <input id="bvh-file" type="file" accept=".bvh8"></label>
-        <label>Map OBJ <input id="map-obj-file" type="file" accept=".obj"></label>
-        <div class="hint">OBJ is visual context only. BVH8 is used for blocked/unblocked rays.</div>
-    </fieldset>
+		<fieldset>
+			<legend>Model</legend>
+			<div class="actions compact">
+				<button id="load-sas">Load SAS GLB</button>
+				<button id="reset-camera">Reset Camera</button>
+			</div>
+			<input id="sas-file" class="hidden-file" type="file" accept=".glb,.gltf">
+			<label>Model opacity <input id="model-opacity" type="range" min="0.1" max="1" step="0.05" value="0.78"></label>
+			<label>Point opacity <input id="point-opacity" type="range" min="0.25" max="1" step="0.05" value="1"></label>
+		</fieldset>
 
-    <fieldset>
-        <legend>Observer</legend>
-        <label>Ping ms <input id="ping" type="number" value="50" step="1"></label>
-        <label>Yaw deg <input id="eye-yaw" type="number" value="0" step="1"></label>
-        <div class="row">
-            <label>Eye X<input id="eye-x" type="number" value="-180" step="1"></label>
-            <label>Eye Y<input id="eye-y" type="number" value="0" step="1"></label>
-            <label>Eye Z<input id="eye-z" type="number" value="64" step="1"></label>
-        </div>
-        <div class="row">
-            <label>Vel X<input id="obs-vx" type="number" value="250" step="1"></label>
-            <label>Vel Y<input id="obs-vy" type="number" value="0" step="1"></label>
-            <label>Vel Z<input id="obs-vz" type="number" value="0" step="1"></label>
-        </div>
-    </fieldset>
+		<fieldset>
+			<legend>Weapon Preview</legend>
+			<label>Weapon
+				<select id="weapon-select">
+					<option value="">none</option>
+					<option value="usp_silencer">USP-S</option>
+					<option value="m4a1_silencer">M4A1-S</option>
+					<option value="awp">AWP</option>
+				</select>
+			</label>
+			<button id="reset-weapon">Reset Grip</button>
+			<div class="row">
+				<label>X<input id="weapon-x" type="number" value="0" step="0.25"></label>
+				<label>Y<input id="weapon-y" type="number" value="0" step="0.25"></label>
+				<label>Z<input id="weapon-z" type="number" value="0" step="0.25"></label>
+			</div>
+			<div class="row">
+				<label>Pitch<input id="weapon-rx" type="number" value="0" step="1"></label>
+				<label>Yaw<input id="weapon-ry" type="number" value="0" step="1"></label>
+				<label>Roll<input id="weapon-rz" type="number" value="0" step="1"></label>
+			</div>
+			<label>Scale <input id="weapon-scale" type="range" min="0.25" max="2" step="0.01" value="1"></label>
+		</fieldset>
 
-    <fieldset>
-        <legend>Target</legend>
-        <div class="row">
-            <label>Origin X<input id="target-x" type="number" value="180" step="1"></label>
-            <label>Origin Y<input id="target-y" type="number" value="0" step="1"></label>
-            <label>Origin Z<input id="target-z" type="number" value="0" step="1"></label>
-        </div>
-        <div class="row">
-            <label>Vel X<input id="target-vx" type="number" value="-250" step="1"></label>
-            <label>Vel Y<input id="target-vy" type="number" value="0" step="1"></label>
-            <label>Vel Z<input id="target-vz" type="number" value="0" step="1"></label>
-        </div>
-        <div class="row">
-            <label>Min X<input id="min-x" type="number" value="-16" step="1"></label>
-            <label>Min Y<input id="min-y" type="number" value="-16" step="1"></label>
-            <label>Min Z<input id="min-z" type="number" value="0" step="1"></label>
-        </div>
-        <div class="row">
-            <label>Max X<input id="max-x" type="number" value="16" step="1"></label>
-            <label>Max Y<input id="max-y" type="number" value="16" step="1"></label>
-            <label>Max Z<input id="max-z" type="number" value="72" step="1"></label>
-        </div>
-    </fieldset>
+		<fieldset>
+			<legend>Collision Bounds</legend>
+			<div class="hint">AABB fallback dots are generated from these bounds and are not exported.</div>
+			<div class="row">
+				<label>Min X<input id="min-x" type="number" value="-16" step="1"></label>
+				<label>Min Y<input id="min-y" type="number" value="-16" step="1"></label>
+				<label>Min Z<input id="min-z" type="number" value="0" step="1"></label>
+			</div>
+			<div class="row">
+				<label>Max X<input id="max-x" type="number" value="16" step="1"></label>
+				<label>Max Y<input id="max-y" type="number" value="16" step="1"></label>
+				<label>Max Z<input id="max-z" type="number" value="72" step="1"></label>
+			</div>
+		</fieldset>
 
-    <fieldset>
-        <legend>Status</legend>
-        <div class="hint">Blue box: real collision bounds. Yellow box: current inflated target. Orange box: swept sampled target when target velocity is active. Green rays pass, red rays are blocked. CS2FOW hides only when all rays are blocked.</div>
-        <div id="status" class="status">loading manifest...</div>
-    </fieldset>
-</aside>
-<script type="module" src="./viewer.js"></script>
+		<fieldset>
+			<legend>LOS Points</legend>
+			<div class="actions">
+				<button id="add-point">Add</button>
+				<button id="duplicate-point">Duplicate</button>
+				<button id="delete-point">Delete</button>
+				<button id="reset-points">Reset</button>
+				<button id="import-los">Import LOS</button>
+				<button id="copy-json">Copy JSON</button>
+				<button id="download-json">Download JSON</button>
+			</div>
+			<input id="import-json" class="hidden-file" type="file" accept=".json,application/json">
+			<table>
+				<thead>
+					<tr><th>Name</th><th>X</th><th>Y</th><th>Z</th></tr>
+				</thead>
+				<tbody id="points-table"></tbody>
+			</table>
+		</fieldset>
+
+		<fieldset>
+			<legend>Status</legend>
+			<div id="status" class="status"></div>
+		</fieldset>
+	</section>
+	<script type="module" src="./viewer.js"></script>
 </body>
 </html>

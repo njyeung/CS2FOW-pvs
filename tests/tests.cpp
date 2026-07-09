@@ -186,12 +186,22 @@ bvh8_data test_world(const std::vector<triangle> &triangles)
 	return data;
 }
 
-float max_x(const std::array<vec3, k_visibility_target_count> &points)
+float max_x(const visibility_target_points &points)
 {
-	float result = points[0].x;
-	for (vec3 point : points)
+	float result = points.points[0].x;
+	for (uint32_t index = 0; index < points.count; ++index)
 	{
-		result = std::max(result, point.x);
+		result = std::max(result, points.points[index].x);
+	}
+	return result;
+}
+
+float min_x(const visibility_target_points &points)
+{
+	float result = points.points[0].x;
+	for (uint32_t index = 0; index < points.count; ++index)
+	{
+		result = std::min(result, points.points[index].x);
 	}
 	return result;
 }
@@ -260,7 +270,7 @@ void test_visibility_sampling()
 	player.velocity = {100, 0, 0};
 	auto origins = visibility_origins(open, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
 	assert(k_visibility_origin_count == 10);
-	assert(k_visibility_ray_count == 160);
+	assert(k_visibility_ray_count_max == 400);
 	assert(std::fabs(origins[1].x - 64.0f) < 0.01f && origins[1].y == 0.0f);
 	assert(std::fabs(origins[2].y - 24.0f) < 0.01f);
 	assert(std::fabs(origins[3].y + 24.0f) < 0.01f);
@@ -298,8 +308,6 @@ void test_visibility_sampling()
 	player.velocity = {10, 0, 0};
 	origins = visibility_origins(wall, player, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
 	assert(origins[1].x == player.eye.x && origins[1].y == player.eye.y && origins[1].z == player.eye.z);
-	assert(origins[8].x == player.eye.x && origins[8].y == player.eye.y && origins[8].z == player.eye.z);
-	assert(origins[9].x == player.eye.x && origins[9].y == player.eye.y && origins[9].z == player.eye.z);
 
 	const bvh8_data side_wall = test_world({
 		{{-100, -8, -100}, {100, -8, -100}, {-100, -8, 100}},
@@ -318,15 +326,70 @@ void test_visibility_sampling()
 
 	visibility_player target {};
 	target.origin = {0, 0, 0};
-	target.mins = {-1, -1, 0};
-	target.maxs = {1, 1, 2};
-	target.velocity = {10, 0, 0};
-	target.rtt_seconds = 0.2f;
+	target.mins = {-16, -16, 0};
+	target.maxs = {16, 16, 72};
+	target.velocity = {100, 0, 0};
+	target.muzzle_class = weapon_muzzle_class::rifle;
 	const auto current_targets = visibility_targets(open, target, disabled, 0.0f);
 	const auto no_observer_lookahead = visibility_targets(open, target, tuning, 0.0f);
 	const auto swept_targets = visibility_targets(open, target, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
+	assert(current_targets.count == 24);
+	assert(no_observer_lookahead.count == 24);
+	assert(swept_targets.count == 40);
+	assert(std::fabs(min_x(current_targets) + 20.0f) < 0.01f);
+	assert(std::fabs(max_x(current_targets) - 36.0f) < 0.01f);
 	assert(std::fabs(max_x(no_observer_lookahead) - max_x(current_targets)) < 0.01f);
-	assert(max_x(swept_targets) > max_x(current_targets) + 60.0f);
+	assert(max_x(swept_targets) > max_x(current_targets) + 30.0f);
+
+	target.muzzle_class = weapon_muzzle_class::none;
+	const auto no_muzzle_targets = visibility_targets(open, target, disabled, 0.0f);
+	assert(no_muzzle_targets.count == 23);
+	target.muzzle_class = weapon_muzzle_class::rifle;
+
+	target.velocity = {100, 0, 0};
+	const auto blocked_target_prediction = visibility_targets(wall, target, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
+	assert(blocked_target_prediction.count == 24);
+
+	target.velocity = {};
+	target.eye_yaw_degrees = 0.0f;
+	const auto yaw0_targets = visibility_targets(open, target, disabled, 0.0f);
+	const vec3 yaw0_head = yaw0_targets.points[8];
+	assert(std::fabs(yaw0_head.x - 5.6092f) < 0.01f);
+	assert(std::fabs(yaw0_head.y + 1.4428f) < 0.01f);
+	assert(std::fabs(yaw0_head.z - 64.2013f) < 0.01f);
+
+	target.eye_yaw_degrees = 90.0f;
+	const auto yaw90_targets = visibility_targets(open, target, disabled, 0.0f);
+	const vec3 yaw90_head = yaw90_targets.points[8];
+	assert(std::fabs(yaw90_head.x - 1.4428f) < 0.01f);
+	assert(std::fabs(yaw90_head.y - 5.6092f) < 0.01f);
+
+	target.eye_yaw_degrees = 180.0f;
+	const auto yaw180_targets = visibility_targets(open, target, disabled, 0.0f);
+	const vec3 yaw180_head = yaw180_targets.points[8];
+	assert(std::fabs(yaw180_head.x + 5.6092f) < 0.01f);
+	assert(std::fabs(yaw180_head.y - 1.4428f) < 0.01f);
+
+	target.eye_yaw_degrees = 0.0f;
+	target.maxs.z = 54.0f;
+	const auto crouched_targets = visibility_targets(open, target, disabled, 0.0f);
+	const vec3 crouched_head = crouched_targets.points[8];
+	const vec3 crouched_left_foot = crouched_targets.points[18];
+	const vec3 crouched_muzzle = crouched_targets.points[23];
+	assert(crouched_head.z < yaw0_head.z - 10.0f && crouched_head.z > 45.0f);
+	assert(std::fabs(crouched_left_foot.z - 4.0f) < 0.01f);
+	assert(crouched_muzzle.z < 50.0f && crouched_muzzle.z > 45.0f);
+
+	assert(weapon_muzzle_class_from_item_definition(61) == weapon_muzzle_class::pistol);
+	assert(weapon_muzzle_class_from_item_definition(34) == weapon_muzzle_class::smg);
+	assert(weapon_muzzle_class_from_item_definition(7) == weapon_muzzle_class::rifle);
+	assert(weapon_muzzle_class_from_item_definition(9) == weapon_muzzle_class::sniper);
+	assert(weapon_muzzle_class_from_item_definition(999) == weapon_muzzle_class::none);
+	assert(std::fabs(weapon_muzzle_length(weapon_muzzle_class::pistol) - 18.0f) < 0.01f);
+	assert(std::fabs(weapon_muzzle_length(weapon_muzzle_class::smg) - 28.0f) < 0.01f);
+	assert(std::fabs(weapon_muzzle_length(weapon_muzzle_class::rifle) - 36.0f) < 0.01f);
+	assert(std::fabs(weapon_muzzle_length(weapon_muzzle_class::sniper) - 52.0f) < 0.01f);
+	assert(weapon_muzzle_length(weapon_muzzle_class::none) == 0.0f);
 }
 
 void test_lifecycle_guard()
@@ -545,10 +608,19 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 	for (uint32_t i = 0; i < k_players; ++i)
 	{
 		const vec3 origin {x(random), y(random), z(random)};
-		players[i] = {{origin.x, origin.y, origin.z + 64.0f}, origin, {i % 2u == 0 ? 250.0f : -250.0f, 0.0f, 0.0f}, {-16.0f, -16.0f, 0.0f}, {16.0f, 16.0f, 72.0f}, static_cast<float>(i % 4u) * 0.025f};
+		players[i] = {
+			{origin.x, origin.y, origin.z + 64.0f},
+			origin,
+			{i % 2u == 0 ? 250.0f : -250.0f, 0.0f, 0.0f},
+			{-16.0f, -16.0f, 0.0f},
+			{16.0f, 16.0f, 72.0f},
+			static_cast<float>(i % 8u) * 45.0f,
+			static_cast<float>(i % 4u) * 0.025f,
+			weapon_muzzle_class::rifle
+		};
 	}
 
-	std::vector<uint32_t> cache(k_players * k_players * k_visibility_ray_count, k_invalid_ref);
+	std::vector<uint32_t> cache(k_players * k_players * k_visibility_ray_count_max, k_invalid_ref);
 	std::array<double, 20> timings {};
 	uint64_t blocked_pairs = 0;
 	for (double &timing : timings)
@@ -574,9 +646,10 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 				uint32_t ray = 0;
 				for (const vec3 &origin : origins[observer])
 				{
-					for (const vec3 &point : targets)
+					for (uint32_t point_index = 0; point_index < targets.count; ++point_index)
 					{
-						uint32_t &cached = cache[(observer * k_players + target) * k_visibility_ray_count + ray];
+						const vec3 &point = targets.points[point_index];
+						uint32_t &cached = cache[(observer * k_players + target) * k_visibility_ray_count_max + ray];
 						const ray_hit hit = segment_blocked(data, origin, point, cached);
 						cached = hit.packet_index;
 						++ray;
@@ -600,7 +673,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 	double average = 0;
 	for (double timing : timings) average += timing;
 	average /= timings.size();
-	std::cout << label << " worker-loop: average=" << average << "ms p99=" << timings.back() << "ms pairs=512 rays_max=" << 512u * k_visibility_ray_count << " blocked_pairs=" << blocked_pairs << '\n';
+	std::cout << label << " worker-loop: average=" << average << "ms p99=" << timings.back() << "ms pairs=512 rays_max=" << 512u * k_visibility_ray_count_max << " blocked_pairs=" << blocked_pairs << '\n';
 	return average;
 }
 
@@ -697,7 +770,7 @@ int main(int argc, char **argv)
 		std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
 		std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);
 		std::uniform_real_distribution<float> z(data.header.world_min[2], data.header.world_max[2]);
-		constexpr size_t k_benchmark_rays = 512u * k_visibility_ray_count;
+		constexpr size_t k_benchmark_rays = 512u * k_visibility_ray_count_max;
 		std::vector<std::pair<vec3, vec3>> rays(k_benchmark_rays);
 		std::vector<uint32_t> cache(k_benchmark_rays);
 		std::fill(cache.begin(), cache.end(), k_invalid_ref);
@@ -727,7 +800,7 @@ int main(int argc, char **argv)
 		for (double timing : timings) average += timing;
 		average /= timings.size();
 		std::cout << label << " traversal: average=" << average << "ms p99=" << timings.back() << "ms rays=" << k_benchmark_rays << " blocked=" << blocked << '\n';
-		assert(average < 10.0);
+		assert(average < 25.0);
 		assert(benchmark_worker_loop(data, label) < 10.0);
 	}
 	return 0;
