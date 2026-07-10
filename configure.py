@@ -1,3 +1,5 @@
+"""Pass local dependency paths and build options to AMBuild; it writes build files only."""
+
 import sys
 
 try:

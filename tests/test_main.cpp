@@ -1,5 +1,8 @@
 #include "test_suites.h"
 
+// Tiny test entry point: creates a temporary workspace, runs the map/BVH and
+// visibility/transmit suites, prints one benchmark, and removes test files.
+
 #include "visibility_sampling.h"
 
 #include <algorithm>

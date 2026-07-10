@@ -1,7 +1,8 @@
 #include "vpk.h"
 
-// Parses Valve package (VPK) directory trees and copies complete entries.
-// All offsets are checked before a file is created.
+// Parses Valve package (VPK) directory trees and copies complete entries for
+// the plugin/baker outside CheckTransmit. It checks paths, offsets, sizes,
+// terminators, preload/archive composition, and CRC before accepting output.
 
 #include "bvh8.h"
 

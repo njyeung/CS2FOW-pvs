@@ -1,3 +1,9 @@
+"""Build verified release ZIPs from already-built binaries and optional map bakes.
+
+Inputs stay inside this checkout; outputs go to packages/. Unsafe/missing ZIP
+entries, broken map/report pairs, modes, integrity, or checksums stop packaging.
+"""
+
 from __future__ import annotations
 
 import hashlib

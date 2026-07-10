@@ -1,5 +1,9 @@
 #include "plugin.h"
 
+// Turns a fresh visibility result into primary-list clears for verified enemy
+// visual groups. CheckTransmit holds the plugin transmit-state lock, skips full
+// updates, allocates nothing, and fails open on stale or mismatched live state.
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -241,7 +245,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		{
 			continue;
 		}
-		const player_state &observer = result->players[slot];
+		const player_state &recipient = result->players[slot];
 		if (transmit_target_cache_[slot].pawn == nullptr)
 		{
 			continue;
@@ -255,7 +259,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			{
 				hidden_group_clear(stored_group);
 			}
-			if (!player.valid || player.team == observer.team || cache.pawn == nullptr)
+			if (!player.valid || player.team == recipient.team || cache.pawn == nullptr)
 			{
 				continue;
 			}

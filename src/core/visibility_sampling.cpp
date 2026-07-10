@@ -1,5 +1,9 @@
 #include "visibility_sampling.h"
 
+// Builds current/predicted eye, body, axis-aligned box, and weapon-muzzle points
+// from copied player numbers. Unsafe prediction stays at the current position;
+// all returned counts remain inside fixed arrays used by the worker.
+
 #include <algorithm>
 #include <cmath>
 

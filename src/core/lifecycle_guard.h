@@ -1,5 +1,9 @@
 #pragma once
 
+// Fixed-size player, pair, visual-group, and quarantine rules shared by game
+// capture and CheckTransmit. Identity changes reset to a timed fail-open state;
+// these helpers allocate no memory in the transmit hook.
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -40,7 +44,7 @@ struct visual_group_key
 
 struct pair_guard
 {
-	lifecycle_key observer_key;
+	lifecycle_key recipient_key;
 	lifecycle_key target_key;
 	visual_group_key target_visual_group;
 	std::chrono::steady_clock::time_point fail_open_until {};
@@ -129,18 +133,18 @@ inline bool lifecycle_allows_hiding(const lifecycle_guard &guard, std::chrono::s
 	return guard.initialized && now >= guard.fail_open_until;
 }
 
-inline bool update_pair_guard(pair_guard &guard, const lifecycle_key &observer_key, bool observer_stable,
+inline bool update_pair_guard(pair_guard &guard, const lifecycle_key &recipient_key, bool recipient_stable,
 	const lifecycle_key &target_key, bool target_stable, std::chrono::steady_clock::time_point now, std::chrono::milliseconds warmup)
 {
-	const bool reset = !guard.initialized || lifecycle_changed(guard.observer_key, observer_key)
-		|| lifecycle_changed(guard.target_key, target_key) || !observer_stable || !target_stable;
+	const bool reset = !guard.initialized || lifecycle_changed(guard.recipient_key, recipient_key)
+		|| lifecycle_changed(guard.target_key, target_key) || !recipient_stable || !target_stable;
 	if (reset)
 	{
 		pair_reset_baseline(guard, now, warmup);
 		guard.target_visual_group = {};
 		guard.visual_group_initialized = false;
 	}
-	guard.observer_key = observer_key;
+	guard.recipient_key = recipient_key;
 	guard.target_key = target_key;
 	guard.initialized = true;
 	return reset;

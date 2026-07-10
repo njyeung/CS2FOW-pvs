@@ -1,5 +1,9 @@
 #include "bvh8.h"
 
+// Answers whether a line segment crosses baked triangles. The background
+// visibility worker supplies immutable, already-validated BVH8 data and copied
+// points; traversal uses fixed stack storage and returns the blocking packet.
+
 #include <bit>
 #include <cmath>
 #include <immintrin.h>

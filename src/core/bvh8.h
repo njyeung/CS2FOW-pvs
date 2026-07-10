@@ -1,5 +1,9 @@
 #pragma once
 
+// Shared map-geometry types and BVH8 read/ray APIs. Callers build or load the
+// data once, then the visibility worker treats it as immutable; invalid files
+// and references return errors instead of becoming partially usable data.
+
 #include <array>
 #include <cstddef>
 #include <cstdint>

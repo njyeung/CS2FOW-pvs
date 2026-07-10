@@ -1,5 +1,9 @@
 #pragma once
 
+// Tiny verified CheckTransmit helpers: parse unsigned gamedata values and read
+// CS2's private full-update flag at the configured offset. They never discover,
+// expose, or mutate auxiliary transmit lists.
+
 #include <charconv>
 #include <cstdint>
 #include <cstring>

@@ -1,5 +1,9 @@
 #include "plugin.h"
 
+// Coordinates plugin load/unload, public commands, map changes, frames, bake
+// validation, and worker submission on the game thread. It activates filtering
+// only after CPU, gamedata, schema, map source, and bake checks all succeed.
+
 #include "vpk.h"
 
 #include <ISmmPlugin.h>

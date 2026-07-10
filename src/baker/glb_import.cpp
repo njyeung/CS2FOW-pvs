@@ -1,3 +1,7 @@
+// Reads the temporary physics GLB made by ValveResourceFormat, filters groups by
+// the documented bake recipe, and outputs finite static collision triangles.
+// It runs only in the baker/tests and rejects malformed accessors or geometry.
+
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"
 

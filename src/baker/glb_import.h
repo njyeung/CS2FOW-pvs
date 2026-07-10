@@ -1,5 +1,8 @@
 #pragma once
 
+// Declares the offline physics-GLB importer. It outputs accepted triangles plus
+// a report explaining every geometry group; invalid input stops the bake.
+
 #include "bvh8.h"
 
 #include <cstdint>

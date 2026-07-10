@@ -1,5 +1,9 @@
 #include "automatic_baker.h"
 
+// Starts, monitors, cancels, and joins the low-priority baker task. The task
+// outputs a completion record protected by this object's mutex and never reads
+// live CS2 objects or activates a bake by itself.
+
 #include "subprocess.h"
 
 #include <vector>

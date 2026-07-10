@@ -1,3 +1,7 @@
+// Local browser editor for body points, generated axis-aligned box corners, and
+// a weapon-muzzle preview. It reads ignored model assets and exports one preset;
+// it does not load maps, cast runtime rays, or change plugin state.
+
 import * as THREE from "https://esm.sh/three@0.160.0";
 import {OrbitControls} from "https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js";
 import {TransformControls} from "https://esm.sh/three@0.160.0/examples/jsm/controls/TransformControls.js";

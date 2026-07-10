@@ -1,5 +1,8 @@
 #pragma once
 
+// Declares the one Valve package (VPK) reader used by all C++ map discovery and
+// extraction. Results contain checked entry metadata or a plain error.
+
 #include <cstdint>
 #include <filesystem>
 #include <string>

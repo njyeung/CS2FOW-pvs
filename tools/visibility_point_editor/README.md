@@ -1,16 +1,16 @@
-# CS2FOW LOS Point Editor
+# CS2FOW line-of-sight point editor
 
-Local-only editor for tuning CS2FOW target LOS points against the exported CS2 SAS model.
+Local-only editor for tuning CS2FOW target line-of-sight (LOS) points against the exported CS2 SAS model.
 
 The editor shows:
 
 - the local SAS GLB model
 - optional USP-S, M4A1-S, and AWP previews attached to the right hand
-- 8 generated collision AABB fallback points
+- 8 generated axis-aligned bounding box (AABB) fallback points
 - 15 editable body LOS points
 - one dynamic weapon muzzle point when a weapon is selected
 
-It does not load maps, BVH8 files, rays, hit triangles, or runtime worker state. Valve model exports are local assets and must not be committed.
+It does not load maps, bounding volume hierarchy (BVH8) files, rays, hit triangles, or runtime worker state. Valve model exports are local assets and must not be committed.
 
 ## Export Local Assets
 
@@ -50,4 +50,4 @@ The editor exports only the ordered body-point preset:
 }
 ```
 
-Runtime integration is intentionally separate. CS2FOW will later combine these body points with generated AABB fallback corners.
+Runtime integration is intentionally separate. CS2FOW combines these body points with generated axis-aligned bounding box corners and a muzzle sample in `visibility_sampling.cpp`; `check_points.py` verifies that the body-point order still matches.

@@ -1,5 +1,9 @@
 #include "builder.h"
 
+// Packs accepted static triangles and builds the offline eight-child tree.
+// The baker owns all input/output data; invalid geometry or unsafe limits stop
+// the build instead of producing a bake the runtime might trust.
+
 #include <algorithm>
 #include <array>
 #include <cmath>

@@ -1,5 +1,9 @@
 #pragma once
 
+// Plain copied player input and the line-of-sight sampling API. The background
+// worker receives current movement/body/weapon values and gets bounded recipient
+// and target points without touching live CS2 objects.
+
 #include "bvh8.h"
 
 #include <array>

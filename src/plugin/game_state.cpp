@@ -1,5 +1,9 @@
 #include "plugin.h"
 
+// Reads live controllers, pawns, weapons, bounds, and visual groups on the game
+// thread, then outputs plain copied visibility snapshots. Broken handles,
+// lifecycle changes, or incomplete groups reset toward fail-open behavior.
+
 #include <inetchannelinfo.h>
 #include <tier1/utlvector.h>
 
@@ -409,16 +413,16 @@ bool plugin::capture(visibility_snapshot &value)
 			player.rtt_seconds = std::max(0.0f, channel->GetEngineLatency());
 		}
 	}
-	for (uint32_t observer = 0; observer < k_max_players; ++observer)
+	for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 	{
 		for (uint32_t target = 0; target < k_max_players; ++target)
 		{
-			if (update_pair_guard(pair_guards_[observer][target], keys[observer], stable_slots[observer],
+			if (update_pair_guard(pair_guards_[recipient][target], keys[recipient], stable_slots[recipient],
 				keys[target], stable_slots[target], now, k_pair_baseline_warmup)
-				&& (awaiting_full_update_[observer][target] || hidden_groups_[observer][target].count != 0))
+				&& (awaiting_full_update_[recipient][target] || hidden_groups_[recipient][target].count != 0))
 			{
-				awaiting_full_update_[observer][target] = false;
-				hidden_group_clear(hidden_groups_[observer][target]);
+				awaiting_full_update_[recipient][target] = false;
+				hidden_group_clear(hidden_groups_[recipient][target]);
 			}
 		}
 	}

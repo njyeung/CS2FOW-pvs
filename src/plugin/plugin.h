@@ -1,7 +1,8 @@
 #pragma once
 
-// Declares the one CS2FOW plugin object and the state shared by its runtime
-// files. Live engine objects stay on the game thread.
+// Declares the one CS2FOW plugin object and the fixed runtime state shared by
+// its modules. Live engine objects stay with game-thread/CheckTransmit callers;
+// the worker receives copied snapshots, and uncertain state must fail open.
 
 #include "automatic_baker.h"
 #include "lifecycle_guard.h"

@@ -1,5 +1,9 @@
 #include "test_suites.h"
 
+// Exercises copied visibility sampling/worker behavior and fixed CheckTransmit
+// lifecycle, visual-group, mask, and evidence helpers. Fake data keeps engine
+// objects and live network lists out of the unit tests.
+
 #include "builder.h"
 #include "lifecycle_guard.h"
 #include "transmit_debug.h"
@@ -157,14 +161,14 @@ void test_visibility_sampling()
 	target.velocity = {100, 0, 0};
 	target.muzzle_class = weapon_muzzle_class::rifle;
 	const auto current_targets = visibility_targets(open, target, disabled, 0.0f);
-	const auto no_observer_lookahead = visibility_targets(open, target, tuning, 0.0f);
+	const auto no_recipient_lookahead = visibility_targets(open, target, tuning, 0.0f);
 	const auto swept_targets = visibility_targets(open, target, tuning, visibility_effective_lookahead_seconds(0.0f, tuning));
 	assert(current_targets.count == 24);
-	assert(no_observer_lookahead.count == 24);
+	assert(no_recipient_lookahead.count == 24);
 	assert(swept_targets.count == 40);
 	assert(std::fabs(min_x(current_targets) + 20.0f) < 0.01f);
 	assert(std::fabs(max_x(current_targets) - 36.0f) < 0.01f);
-	assert(std::fabs(max_x(no_observer_lookahead) - max_x(current_targets)) < 0.01f);
+	assert(std::fabs(max_x(no_recipient_lookahead) - max_x(current_targets)) < 0.01f);
 	assert(max_x(swept_targets) > max_x(current_targets) + 30.0f);
 
 	target.muzzle_class = weapon_muzzle_class::none;
@@ -308,18 +312,18 @@ void test_pair_guard()
 	using clock = std::chrono::steady_clock;
 	const auto warmup = std::chrono::milliseconds(1500);
 	const auto start = clock::time_point {} + std::chrono::seconds(20);
-	lifecycle_key observer;
-	observer.has_controller = true;
-	observer.pawn_entity = 10;
-	observer.team = 2;
-	observer.alive = true;
-	lifecycle_key target = observer;
+	lifecycle_key recipient;
+	recipient.has_controller = true;
+	recipient.pawn_entity = 10;
+	recipient.team = 2;
+	recipient.alive = true;
+	lifecycle_key target = recipient;
 	target.pawn_entity = 20;
 	target.team = 3;
 
 	pair_guard guard;
-	assert(update_pair_guard(guard, observer, true, target, true, start, warmup));
-	assert(!update_pair_guard(guard, observer, true, target, true, start, warmup));
+	assert(update_pair_guard(guard, recipient, true, target, true, start, warmup));
+	assert(!update_pair_guard(guard, recipient, true, target, true, start, warmup));
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1499), 1));
 	pair_note_open(guard, start + std::chrono::milliseconds(1499), 1);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(1500), 1));
@@ -331,7 +335,7 @@ void test_pair_guard()
 	const visual_group_key group = test_visual_key({10, 20, 30});
 	const visual_group_key same_group = test_visual_key({30, 20, 10, 10});
 	const visual_group_key changed_group = test_visual_key({10, 20, 31});
-	update_pair_guard(visual_guard, observer, true, target, true, start, warmup);
+	update_pair_guard(visual_guard, recipient, true, target, true, start, warmup);
 	update_pair_visual_group(visual_guard, group, start, warmup);
 	assert(!pair_allows_hiding(visual_guard, start + std::chrono::milliseconds(1499), 1));
 	pair_note_open(visual_guard, start + std::chrono::milliseconds(1500), 1);
@@ -346,7 +350,7 @@ void test_pair_guard()
 
 	lifecycle_key changed = target;
 	changed.team = 2;
-	assert(update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(2000), warmup));
+	assert(update_pair_guard(guard, recipient, true, changed, true, start + std::chrono::milliseconds(2000), warmup));
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3499), 3));
 	pair_note_open(guard, start + std::chrono::milliseconds(3500), 3);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(3500), 3));
@@ -354,12 +358,12 @@ void test_pair_guard()
 
 	lifecycle_key dead = changed;
 	dead.alive = false;
-	assert(update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4000), warmup));
-	assert(update_pair_guard(guard, observer, true, dead, false, start + std::chrono::milliseconds(4500), warmup));
+	assert(update_pair_guard(guard, recipient, true, dead, false, start + std::chrono::milliseconds(4000), warmup));
+	assert(update_pair_guard(guard, recipient, true, dead, false, start + std::chrono::milliseconds(4500), warmup));
 	pair_note_open(guard, start + std::chrono::milliseconds(5999), 5);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(5999), 6));
 
-	assert(update_pair_guard(guard, observer, true, changed, true, start + std::chrono::milliseconds(6000), warmup));
+	assert(update_pair_guard(guard, recipient, true, changed, true, start + std::chrono::milliseconds(6000), warmup));
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7499), 7));
 	pair_note_open(guard, start + std::chrono::milliseconds(7500), 7);
 	assert(!pair_allows_hiding(guard, start + std::chrono::milliseconds(7500), 7));
@@ -534,28 +538,28 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 		const auto start = std::chrono::steady_clock::now();
 		std::array<float, k_players> lookahead {};
 		std::array<std::array<vec3, k_visibility_origin_count>, k_players> origins {};
-		for (uint32_t observer = 0; observer < k_players; ++observer)
+		for (uint32_t recipient = 0; recipient < k_players; ++recipient)
 		{
-			lookahead[observer] = visibility_effective_lookahead_seconds(players[observer].rtt_seconds, tuning);
-			origins[observer] = visibility_origins(data, players[observer], tuning, lookahead[observer]);
+			lookahead[recipient] = visibility_effective_lookahead_seconds(players[recipient].rtt_seconds, tuning);
+			origins[recipient] = visibility_origins(data, players[recipient], tuning, lookahead[recipient]);
 		}
-		for (uint32_t observer = 0; observer < k_players; ++observer)
+		for (uint32_t recipient = 0; recipient < k_players; ++recipient)
 		{
 			for (uint32_t target = 0; target < k_players; ++target)
 			{
-				if ((observer < 16u) == (target < 16u))
+				if ((recipient < 16u) == (target < 16u))
 				{
 					continue;
 				}
-				const auto targets = visibility_targets(data, players[target], tuning, lookahead[observer]);
+				const auto targets = visibility_targets(data, players[target], tuning, lookahead[recipient]);
 				bool blocked = true;
 				uint32_t ray = 0;
-				for (const vec3 &origin : origins[observer])
+				for (const vec3 &origin : origins[recipient])
 				{
 					for (uint32_t point_index = 0; point_index < targets.count; ++point_index)
 					{
 						const vec3 &point = targets.points[point_index];
-						uint32_t &cached = cache[(observer * k_players + target) * k_visibility_ray_count_max + ray];
+						uint32_t &cached = cache[(recipient * k_players + target) * k_visibility_ray_count_max + ray];
 						const ray_hit hit = segment_blocked(data, origin, point, cached);
 						cached = hit.packet_index;
 						++ray;

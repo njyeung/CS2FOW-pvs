@@ -1,7 +1,8 @@
 #pragma once
 
-// Runs the external map baker away from the game thread and reports one final
-// result back to the plugin.
+// Runs one external map baker away from the game thread. It receives copied
+// map paths/metadata and reports one validated completion; stop/cancel joins the
+// task before its request state can be replaced.
 
 #include "bvh8.h"
 #include "map_source.h"

@@ -1,5 +1,9 @@
 #pragma once
 
+// Describes the exact VPK entry from which one map bake is derived. The plugin,
+// baker, and service-facing CLI use this value to agree on safe names, source
+// kind, CRC, and size before a bake can be trusted.
+
 #include "bvh8.h"
 #include "vpk.h"
 

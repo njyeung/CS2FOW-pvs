@@ -1,5 +1,9 @@
 #pragma once
 
+// Fixed-capacity evidence collected only for real primary-list clears. The
+// CheckTransmit caller supplies one event; records aggregate recipients and
+// reasons in place so the hot hook never allocates or prints automatically.
+
 #include <array>
 #include <chrono>
 #include <cstddef>

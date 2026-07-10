@@ -1,5 +1,9 @@
 #include "subprocess.h"
 
+// Runs one external program and captures its output on a non-game thread or in
+// the command-line baker. Platform handles are always closed, and timeout or
+// cancellation terminates the child and returns an ordinary result/error.
+
 #include <thread>
 
 #if defined(_WIN32)

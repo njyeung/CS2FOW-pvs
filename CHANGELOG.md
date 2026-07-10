@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0-preview
+
+- Reorganized the runtime into map/game-state, worker, transmit, and automatic-baker responsibilities without intentionally changing proven visibility behavior.
+- Restricted filtering to CS2's verified primary transmit list and left full-update snapshots untouched.
+- Kept hidden visual groups withheld until CS2 naturally sends the recipient a full update; CS2FOW never requests one.
+- Added fixed-size `cs2fow_entity` evidence for real primary-bit clears, including direct and owner/effect-linked membership.
+- Hardened player lifecycles, visual-group identity, linked entities, stale results, and fail-open resets.
+- Added validated BVH8 version 3 files with streaming CRC checks and verified atomic replacement; older bakes are rejected.
+- Moved all Workshop VPK discovery and extraction into the C++ baker, including the public `--list-maps` command.
+- Added held-weapon muzzle sampling alongside body and axis-aligned bounding box target points.
+- Split and expanded map/BVH and visibility/transmit tests, package verification, and the line-of-sight point editor checks.
+- Added a plain-language code tour and corrected operator documentation.
+
 ## 0.1.2-preview
 
 - Further hardened CheckTransmit player lifecycle checks.

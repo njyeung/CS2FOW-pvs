@@ -1,3 +1,9 @@
+"""Export ignored local SAS/weapon model assets for the line-of-sight editor.
+
+The script reads a user-supplied CS2 installation through ValveResourceFormat,
+writes only local_assets/, and never changes runtime visibility points.
+"""
+
 from __future__ import annotations
 
 import argparse

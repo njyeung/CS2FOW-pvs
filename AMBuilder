@@ -1,3 +1,6 @@
+# Defines exactly which first-party sources enter the baker, tests, and plugin.
+# AMBuild supplies the compilers; this file outputs three platform build targets.
+
 import os
 
 root = builder.sourcePath

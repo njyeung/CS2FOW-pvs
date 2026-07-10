@@ -1,5 +1,9 @@
 #include "test_suites.h"
 
+// Exercises VPK/map discovery, physics import, BVH building/traversal, version 3
+// file rejection/atomic replacement, subprocesses, and baker CLI fixtures.
+// All inputs are local temporary fixtures; no game or network state is used.
+
 #include "builder.h"
 #include "glb_import.h"
 #include "map_source.h"

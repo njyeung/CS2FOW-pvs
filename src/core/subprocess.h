@@ -1,5 +1,8 @@
 #pragma once
 
+// Declares the small cross-platform process runner used by the baker and its
+// controller. Arguments stay separate from the executable; callers receive
+// timeout/cancellation/exit state and captured output without a shell string.
 
 #include <atomic>
 #include <chrono>

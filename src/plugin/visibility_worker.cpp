@@ -1,5 +1,9 @@
 #include "visibility_worker.h"
 
+// Consumes the newest copied snapshot, casts bounded BVH8 rays, applies reveal
+// hold, updates worker-only caches/statistics, and publishes one complete result.
+// No function in this file dereferences a live engine object.
+
 #include <algorithm>
 
 namespace cs2fow
@@ -15,16 +19,16 @@ void visibility_worker::start(const bvh8_data *data)
 	stop();
 	data_ = data;
 	stopping_ = false;
-	for (auto &observer : cached_packets_)
+	for (auto &recipient : cached_packets_)
 	{
-		for (auto &target : observer)
+		for (auto &target : recipient)
 		{
 			target.fill(k_invalid_ref);
 		}
 	}
-	for (auto &observer : revealed_until_)
+	for (auto &recipient : revealed_until_)
 	{
-		observer.fill(std::chrono::steady_clock::time_point {});
+		recipient.fill(std::chrono::steady_clock::time_point {});
 	}
 	{
 		std::lock_guard lock(stats_mutex_);
@@ -100,38 +104,38 @@ void visibility_worker::run()
 		auto result = std::make_shared<visibility_result>();
 		result->sequence = current.sequence;
 		std::copy(std::begin(current.players), std::end(current.players), std::begin(result->players));
-		std::array<float, k_max_players> observer_lookahead {};
-		std::array<std::array<vec3, k_visibility_origin_count>, k_max_players> observer_origins {};
-		for (uint32_t observer = 0; observer < k_max_players; ++observer)
+		std::array<float, k_max_players> recipient_lookahead {};
+		std::array<std::array<vec3, k_visibility_origin_count>, k_max_players> recipient_origins {};
+		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 		{
-			if (current.players[observer].valid)
+			if (current.players[recipient].valid)
 			{
-				observer_lookahead[observer] = visibility_effective_lookahead_seconds(current.players[observer].rtt_seconds, tuning);
-				observer_origins[observer] = visibility_origins(*data_, sample_player(current.players[observer]), tuning, observer_lookahead[observer]);
+				recipient_lookahead[recipient] = visibility_effective_lookahead_seconds(current.players[recipient].rtt_seconds, tuning);
+				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]), tuning, recipient_lookahead[recipient]);
 			}
 		}
-		for (uint32_t observer = 0; observer < k_max_players; ++observer)
+		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
 		{
 			for (uint32_t target = 0; target < k_max_players; ++target)
 			{
-				result->visible[observer][target] = true;
-				const player_state &from = current.players[observer];
+				result->visible[recipient][target] = true;
+				const player_state &from = current.players[recipient];
 				const player_state &to = current.players[target];
-				if (!from.valid || !to.valid || observer == target || from.team == to.team)
+				if (!from.valid || !to.valid || recipient == target || from.team == to.team)
 				{
 					continue;
 				}
 				++result->evaluated_pairs;
 				bool blocked = true;
-				const auto &ray_origins = observer_origins[observer];
-				const auto ray_targets = visibility_targets(*data_, sample_player(to), tuning, observer_lookahead[observer]);
+				const auto &ray_origins = recipient_origins[recipient];
+				const auto ray_targets = visibility_targets(*data_, sample_player(to), tuning, recipient_lookahead[recipient]);
 				uint32_t ray = 0;
 				for (const vec3 &origin : ray_origins)
 				{
 					for (uint32_t point_index = 0; point_index < ray_targets.count; ++point_index)
 					{
-						const ray_hit hit = segment_blocked(*data_, origin, ray_targets.points[point_index], cached_packets_[observer][target][ray]);
-						cached_packets_[observer][target][ray++] = hit.packet_index;
+						const ray_hit hit = segment_blocked(*data_, origin, ray_targets.points[point_index], cached_packets_[recipient][target][ray]);
+						cached_packets_[recipient][target][ray++] = hit.packet_index;
 						if (!hit.blocked)
 						{
 							blocked = false;
@@ -146,10 +150,10 @@ void visibility_worker::run()
 				const auto now = std::chrono::steady_clock::now();
 				if (!blocked)
 				{
-					revealed_until_[observer][target] = now + std::chrono::milliseconds(hold_ms);
+					revealed_until_[recipient][target] = now + std::chrono::milliseconds(hold_ms);
 				}
-				const bool visible = !blocked || now < revealed_until_[observer][target];
-				result->visible[observer][target] = visible;
+				const bool visible = !blocked || now < revealed_until_[recipient][target];
+				result->visible[recipient][target] = visible;
 				visible ? ++result->visible_pairs : ++result->hidden_pairs;
 			}
 		}

@@ -1,8 +1,8 @@
 #include "bvh8.h"
 
-// Reads and writes the baked wall file. It rejects the header before any
-// large allocation and never removes a working bake before its replacement
-// has been written and checked.
+// Reads and writes baked wall files outside the transmit hook. It returns a
+// complete validated BVH8 or an error, rejects headers before large allocation,
+// and keeps an old working bake until its replacement has been written/checked.
 
 #include <algorithm>
 #include <cmath>

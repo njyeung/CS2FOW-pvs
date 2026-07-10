@@ -1,4 +1,8 @@
 #include "builder.h"
+
+// Command-line coordinator for map listing and baking. It turns validated VPK
+// physics into a verified BVH8/report (and optional OBJ), owns temporary files,
+// and exits with an error before replacing trusted output on any failed step.
 #include "glb_import.h"
 #include "map_source.h"
 #include "subprocess.h"

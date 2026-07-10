@@ -1,4 +1,8 @@
-"""Fail when the editor preset no longer matches the points compiled into CS2FOW."""
+"""Compare the editor preset with body points compiled into CS2FOW.
+
+This read-only build check prints success or exits with an error; it prevents an
+editor-only change from silently disagreeing with runtime ray targets.
+"""
 
 import json
 import math

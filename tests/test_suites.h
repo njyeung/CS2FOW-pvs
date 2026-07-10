@@ -1,5 +1,8 @@
 #pragma once
 
+// Names the two assert-based test groups and their shared worker benchmark.
+// Tests return normally on success and abort at the exact failed assertion.
+
 #include "bvh8.h"
 
 #include <filesystem>

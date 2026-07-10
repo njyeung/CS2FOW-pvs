@@ -1,3 +1,6 @@
+# Resolves pinned SDK/reference directories and hands one x86-64 compiler setup
+# to AMBuilder. Missing dependencies stop configuration instead of guessing.
+
 import os
 
 def source_path(path):

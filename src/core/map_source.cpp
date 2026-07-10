@@ -1,5 +1,9 @@
 #include "map_source.h"
 
+// Finds a map's direct physics resource or nested map VPK and lists safe map
+// names. It consumes validated VPK metadata and returns one reproducible source;
+// direct physics wins, while malformed/unsafe paths return an error.
+
 #include <algorithm>
 #include <cctype>
 #include <set>

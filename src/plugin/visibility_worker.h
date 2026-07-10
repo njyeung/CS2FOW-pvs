@@ -1,7 +1,8 @@
 #pragma once
 
 // Owns the background ray-casting thread. The game thread gives it copied
-// player data; it never reads live CS2 objects.
+// player data; it publishes immutable visibility results and never reads live
+// CS2 objects. New pending work replaces old pending work instead of queuing.
 
 #include "bvh8.h"
 #include "visibility_sampling.h"
