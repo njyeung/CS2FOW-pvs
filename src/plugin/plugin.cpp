@@ -693,6 +693,7 @@ public:
 	void print_status() const;
 	void print_entities(int edict);
 	void clear_entity_records();
+	void reset_transmit_state(bool clear_debug_records = true);
 
 	const char *GetAuthor() override { return "karola3vax"; }
 	const char *GetName() override { return "CS2FOW"; }
@@ -725,7 +726,6 @@ private:
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	void record_hidden_entity(CGameEntitySystem *system, size_t member_index, int edict, const visual_entity_group &group,
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
-	void reset_transmit_state();
 	bool capture(snapshot &value);
 
 	ISmmAPI *api_ {};
@@ -765,7 +765,15 @@ private:
 
 plugin g_plugin;
 
-CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true);
+void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new_value, const bool *old_value)
+{
+	if (new_value != nullptr && old_value != nullptr && *new_value != *old_value)
+	{
+		g_plugin.reset_transmit_state(false);
+	}
+}
+
+CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
 CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum latency lookahead", 500, true, 0, true, 500);
 CConVar<int> cs2fow_min_lookahead_ms("cs2fow_min_lookahead_ms", FCVAR_NONE, "Minimum reveal lookahead", 200, true, 0, true, 500);
@@ -1273,7 +1281,7 @@ void plugin::disable(std::string reason)
 	disabled_reason_ = std::move(reason);
 }
 
-void plugin::reset_transmit_state()
+void plugin::reset_transmit_state(bool clear_debug_records)
 {
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	for (lifecycle_guard &guard : lifecycle_)
@@ -1303,7 +1311,10 @@ void plugin::reset_transmit_state()
 	{
 		entity = {};
 	}
-	recent_hides_.clear();
+	if (clear_debug_records)
+	{
+		recent_hides_.clear();
+	}
 }
 
 bool plugin::resolve_map_source(const std::string &map, map_source &source, std::string &error) const
