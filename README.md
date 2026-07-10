@@ -1,4 +1,17 @@
+<div align="center">
+
 # CS2FOW
+
+### Server-side anti-wallhack for Counter-Strike 2 community servers
+
+[![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?style=for-the-badge&label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
+[![Issues](https://img.shields.io/github/issues/karola3vax/CS2FOW?style=for-the-badge&label=issues)](https://github.com/karola3vax/CS2FOW/issues)
+[![License](https://img.shields.io/github/license/karola3vax/CS2FOW?style=for-the-badge&label=license)](LICENSE)
+
+![CS2FOW demonstration](docs/CS2FOW.gif)
+
+</div>
 
 CS2FOW is a server-side anti-wallhack plugin for Counter-Strike 2 community servers. It withholds a living enemy's visual entities when solid map walls fully block that enemy from a living opponent.
 
