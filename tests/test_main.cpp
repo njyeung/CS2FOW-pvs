@@ -1,0 +1,86 @@
+#include "test_suites.h"
+
+#include "visibility_sampling.h"
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <chrono>
+#include <cstring>
+#include <filesystem>
+#include <iostream>
+#include <random>
+#include <thread>
+#include <utility>
+#include <vector>
+
+using namespace cs2fow;
+
+int main(int argc, char **argv)
+{
+	if (argc == 3 && std::strcmp(argv[1], "--process-probe") == 0)
+	{
+		return std::strcmp(argv[2], "space [test]") == 0 ? 23 : 24;
+	}
+	if (argc == 2 && std::strcmp(argv[1], "--process-sleep") == 0)
+	{
+		std::this_thread::sleep_for(std::chrono::seconds(10));
+		return 0;
+	}
+	assert(cpu_supports_avx());
+	const std::filesystem::path directory = std::filesystem::temp_directory_path()
+		/ ("cs2fow-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+	std::filesystem::remove_all(directory);
+	std::filesystem::create_directories(directory);
+	run_map_and_bvh_tests(directory, std::filesystem::absolute(argv[0]));
+	run_visibility_and_transmit_tests();
+	std::filesystem::remove_all(directory);
+	std::cout << "cs2fow_tests: all checks passed\n";
+
+	if (argc != 2)
+	{
+		return 0;
+	}
+	bvh8_data data;
+	std::string error;
+	assert(load_bvh8(argv[1], data, error));
+	std::string label = std::filesystem::path(argv[1]).stem().string();
+	if (label.empty()) label = "BVH8";
+	std::mt19937 random(0xb8f8u);
+	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
+	std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);
+	std::uniform_real_distribution<float> z(data.header.world_min[2], data.header.world_max[2]);
+	constexpr size_t k_benchmark_rays = 512u * k_visibility_ray_count_max;
+	std::vector<std::pair<vec3, vec3>> rays(k_benchmark_rays);
+	std::vector<uint32_t> cache(k_benchmark_rays, k_invalid_ref);
+	for (auto &ray : rays)
+	{
+		ray = {{x(random), y(random), z(random)}, {x(random), y(random), z(random)}};
+	}
+	for (size_t index = 0; index < rays.size(); ++index)
+	{
+		cache[index] = segment_blocked(data, rays[index].first, rays[index].second).packet_index;
+	}
+	std::array<double, 20> timings {};
+	uint64_t blocked = 0;
+	for (double &timing : timings)
+	{
+		const auto start = std::chrono::steady_clock::now();
+		for (size_t index = 0; index < rays.size(); ++index)
+		{
+			const ray_hit hit = segment_blocked(data, rays[index].first, rays[index].second, cache[index]);
+			cache[index] = hit.packet_index;
+			blocked += hit.blocked;
+		}
+		timing = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	}
+	std::sort(timings.begin(), timings.end());
+	double average = 0;
+	for (double timing : timings) average += timing;
+	average /= timings.size();
+	std::cout << label << " traversal: average=" << average << "ms p99=" << timings.back()
+		<< "ms rays=" << k_benchmark_rays << " blocked=" << blocked << '\n';
+	assert(average < 25.0);
+	assert(run_worker_benchmark(data, label) < 10.0);
+	return 0;
+}

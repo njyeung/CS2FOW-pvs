@@ -60,7 +60,9 @@ tests.sources += geometry + map_io + [
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
   os.path.join(root, 'src', 'plugin', 'visibility_worker.cpp'),
-  os.path.join(root, 'tests', 'tests.cpp'),
+  os.path.join(root, 'tests', 'map_and_bvh_tests.cpp'),
+  os.path.join(root, 'tests', 'test_main.cpp'),
+  os.path.join(root, 'tests', 'visibility_and_transmit_tests.cpp'),
 ]
 builder.Add(tests)
 
