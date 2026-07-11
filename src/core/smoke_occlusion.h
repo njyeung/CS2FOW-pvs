@@ -5,7 +5,10 @@
 
 #include "bvh8.h"
 
+#include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -17,6 +20,7 @@ inline constexpr uint32_t k_smoke_axis_cells = 32;
 inline constexpr uint32_t k_smoke_cell_count = k_smoke_axis_cells * k_smoke_axis_cells * k_smoke_axis_cells;
 inline constexpr uint32_t k_smoke_mask_bytes = k_smoke_cell_count / 8;
 inline constexpr uint32_t k_max_smoke_volumes = 32;
+inline constexpr uint32_t k_max_he_clearances = 64;
 inline constexpr size_t k_smoke_storage_mask_offset = 8;
 inline constexpr size_t k_smoke_storage_density_offset = 0x3008;
 inline constexpr size_t k_smoke_storage_frame_stride = 0x80000;
@@ -30,9 +34,51 @@ struct smoke_volume_snapshot
 	std::array<float, k_smoke_cell_count> density {};
 };
 
+struct he_smoke_clearance
+{
+	vec3 center;
+	float age_seconds {};
+};
+
+struct live_he_clearance
+{
+	vec3 center;
+	std::chrono::steady_clock::time_point detonated;
+};
+
+struct he_clearance_history
+{
+	std::array<live_he_clearance, k_max_he_clearances> records {};
+	uint32_t count {};
+	uint32_t next {};
+
+	bool record(vec3 center, std::chrono::steady_clock::time_point now)
+	{
+		if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z))
+		{
+			return false;
+		}
+		records[next] = {center, now};
+		next = (next + 1u) % static_cast<uint32_t>(records.size());
+		count = std::min(count + 1u, static_cast<uint32_t>(records.size()));
+		return true;
+	}
+
+	void clear()
+	{
+		records = {};
+		count = 0;
+		next = 0;
+	}
+};
+
 struct smoke_snapshot
 {
 	std::vector<smoke_volume_snapshot> volumes;
+	std::array<he_smoke_clearance, k_max_he_clearances> he_clearances {};
+	uint32_t he_clearance_count {};
+	float he_clear_radius_units {};
+	float he_clear_seconds {};
 };
 
 bool copy_smoke_frame(const std::byte *storage, int32_t frame, vec3 center, float age_seconds,
@@ -57,6 +103,7 @@ bool copy_stable_smoke_frame(const std::byte *storage, vec3 center, float age_se
 	return false;
 }
 
-bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target, float age_advance_seconds = 0.0f);
+bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target, float age_advance_seconds = 0.0f,
+	const bvh8_data *geometry = nullptr);
 
 } // namespace cs2fow

@@ -3,6 +3,7 @@
 ## 0.2.0-preview
 
 - Added default-on smoke occlusion from CS2's live voxel grid, with copied worker data and smoke-only fail-open behavior.
+- Added wall-safe, configurable three-second visibility channels through smoke disturbed by HE grenades.
 - Matched visible smoke timing more closely by delaying initial occlusion and revealing fading smoke 0.5 seconds earlier.
 - Added optional teammate visibility filtering with the same wall, smoke, prediction, and full-group rules used for enemies.
 - Reorganized the runtime into map/game-state, worker, transmit, and automatic-baker responsibilities without intentionally changing proven visibility behavior.

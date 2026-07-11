@@ -158,6 +158,7 @@ void plugin::reset_transmit_state(bool clear_debug_records)
 	{
 		entity = {};
 	}
+	he_clearance_history_.clear();
 	if (clear_debug_records)
 	{
 		recent_hides_.clear();

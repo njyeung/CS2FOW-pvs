@@ -16,6 +16,7 @@
 #include <entity2/entitysystem.h>
 #include <filesystem.h>
 #include <iserver.h>
+#include <igameevents.h>
 #include <schemasystem/schemasystem.h>
 #include <tier1/convar.h>
 
@@ -146,7 +147,7 @@ void copy_entity_name(CEntityInstance *entity, char (&name)[k_max_entity_name]);
 bool valid_networked_edict_index(int index);
 int resolve_entity_index(CGameEntitySystem *system, CEntityHandle handle);
 
-class plugin final : public ISmmPlugin, public IMetamodListener
+class plugin final : public ISmmPlugin, public IMetamodListener, public IGameEventListener2
 {
 public:
 	bool Load(PluginId id, ISmmAPI *api, char *error, size_t max_length, bool late) override;
@@ -157,6 +158,7 @@ public:
 	void hook_game_frame(bool simulating, bool first_tick, bool last_tick);
 	void hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<MAX_EDICTS> &, CBitVec<MAX_EDICTS> &,
 		const Entity2Networkable_t **, const uint16 *, int);
+	void FireGameEvent(IGameEvent *event) override;
 	void print_status() const;
 	void print_entities(int edict);
 	void clear_entity_records();
@@ -198,7 +200,7 @@ private:
 		int recipient_slot, hide_reason reason, std::chrono::steady_clock::time_point now);
 	bool capture(visibility_snapshot &value, float game_time);
 	bool capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
-		bool overflow, float game_time, visibility_snapshot &value) const;
+		bool overflow, float game_time, visibility_snapshot &value);
 
 	ISmmAPI *api_ {};
 	IServerGameDLL *server_ {};
@@ -207,6 +209,7 @@ private:
 	ICvar *cvar_ {};
 	ISchemaSystem *schema_ {};
 	IFileSystem *filesystem_ {};
+	IGameEventManager2 *game_events_ {};
 	game_resource_service *game_resource_ {};
 	schema_offsets fields_;
 	uint32_t recipient_slot_offset_ {};
@@ -225,6 +228,8 @@ private:
 	bool owner_effect_schema_available_ {};
 	bool smoke_schema_available_ {};
 	bool smoke_gamedata_available_ {};
+	bool he_event_available_ {};
+	he_clearance_history he_clearance_history_;
 	std::array<aux_visual_entity, k_max_aux_visual_cache_entities> aux_visual_entities_;
 	size_t aux_visual_count_ {};
 	recent_hide_log recent_hides_;
@@ -241,6 +246,8 @@ private:
 extern plugin g_plugin;
 extern CConVar<bool> cs2fow_enable;
 extern CConVar<bool> cs2fow_smoke_occlusion;
+extern CConVar<float> cs2fow_he_clear_radius_units;
+extern CConVar<float> cs2fow_he_clear_seconds;
 extern CConVar<bool> cs2fow_filter_teammates;
 extern CConVar<int> cs2fow_update_interval_ms;
 extern CConVar<int> cs2fow_base_lookahead_ms;

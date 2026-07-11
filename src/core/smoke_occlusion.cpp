@@ -182,6 +182,41 @@ float volume_density(const smoke_volume_snapshot &volume, vec3 origin, vec3 targ
 	return accumulated;
 }
 
+float square(float value)
+{
+	return value * value;
+}
+
+bool clearance_opens_volume(const he_smoke_clearance &clearance, const smoke_volume_snapshot &volume,
+	vec3 origin, vec3 target, float radius, float duration, float age_advance, const bvh8_data *geometry)
+{
+	const float age = clearance.age_seconds + std::max(age_advance, 0.0f);
+	if (geometry == nullptr || radius <= 0.0f || duration <= 0.0f || age < 0.0f || age >= duration)
+	{
+		return false;
+	}
+	const float box_dx = std::max(std::fabs(clearance.center.x - volume.center.x) - k_half_extent, 0.0f);
+	const float box_dy = std::max(std::fabs(clearance.center.y - volume.center.y) - k_half_extent, 0.0f);
+	const float box_dz = std::max(std::fabs(clearance.center.z - volume.center.z) - k_half_extent, 0.0f);
+	const float radius_squared = square(radius);
+	if (square(box_dx) + square(box_dy) + square(box_dz) > radius_squared)
+	{
+		return false;
+	}
+	const vec3 direction {target.x - origin.x, target.y - origin.y, target.z - origin.z};
+	const float length_squared = square(direction.x) + square(direction.y) + square(direction.z);
+	const vec3 from_origin {clearance.center.x - origin.x, clearance.center.y - origin.y, clearance.center.z - origin.z};
+	const float parameter = length_squared <= 0.0f ? 0.0f : std::clamp(
+		(from_origin.x * direction.x + from_origin.y * direction.y + from_origin.z * direction.z) / length_squared, 0.0f, 1.0f);
+	const vec3 closest {origin.x + direction.x * parameter, origin.y + direction.y * parameter, origin.z + direction.z * parameter};
+	if (square(clearance.center.x - closest.x) + square(clearance.center.y - closest.y)
+		+ square(clearance.center.z - closest.z) > radius_squared)
+	{
+		return false;
+	}
+	return !segment_blocked(*geometry, clearance.center, closest).blocked;
+}
+
 } // namespace
 
 bool copy_smoke_frame(const std::byte *storage, int32_t frame, vec3 center, float age_seconds,
@@ -210,11 +245,26 @@ bool copy_smoke_frame(const std::byte *storage, int32_t frame, vec3 center, floa
 	return true;
 }
 
-bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target, float age_advance_seconds)
+bool smoke_line_blocked(const smoke_snapshot &snapshot, vec3 origin, vec3 target, float age_advance_seconds,
+	const bvh8_data *geometry)
 {
 	float total = 0.0f;
 	for (const smoke_volume_snapshot &volume : snapshot.volumes)
 	{
+		bool cleared = false;
+		for (uint32_t index = 0; index < snapshot.he_clearance_count && index < snapshot.he_clearances.size(); ++index)
+		{
+			if (clearance_opens_volume(snapshot.he_clearances[index], volume, origin, target,
+				snapshot.he_clear_radius_units, snapshot.he_clear_seconds, age_advance_seconds, geometry))
+			{
+				cleared = true;
+				break;
+			}
+		}
+		if (cleared)
+		{
+			continue;
+		}
 		total += volume_density(volume, origin, target) * age_scale(volume.age_seconds + std::max(age_advance_seconds, 0.0f));
 		if (total >= k_block_density)
 		{

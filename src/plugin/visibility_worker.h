@@ -65,6 +65,7 @@ struct visibility_result
 	bool smoke_enabled {};
 	bool smoke_available {};
 	uint32_t smoke_count {};
+	uint32_t he_clearance_count {};
 	bool visible[k_max_players][k_max_players] {};
 	double worker_ms {};
 	uint32_t evaluated_pairs {};

@@ -40,6 +40,7 @@ namespace cs2fow
 {
 
 plugin g_plugin;
+constexpr const char *k_game_event_manager_interface = "GAMEEVENTSMANAGER002";
 
 void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new_value, const bool *old_value)
 {
@@ -49,8 +50,20 @@ void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new
 	}
 }
 
+void on_cs2fow_float_changed(CConVar<float> *, CSplitScreenSlot, const float *new_value, const float *old_value)
+{
+	if (new_value != nullptr && old_value != nullptr && *new_value != *old_value)
+	{
+		g_plugin.reset_transmit_state(false);
+	}
+}
+
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
 CConVar<bool> cs2fow_smoke_occlusion("cs2fow_smoke_occlusion", FCVAR_NONE, "Use live CS2 smoke for visibility", true, on_cs2fow_enable_changed);
+CConVar<float> cs2fow_he_clear_radius_units("cs2fow_he_clear_radius_units", FCVAR_NONE, "HE-cleared smoke channel radius", 100.0f,
+	true, 0.0f, true, 320.0f, on_cs2fow_float_changed);
+CConVar<float> cs2fow_he_clear_seconds("cs2fow_he_clear_seconds", FCVAR_NONE, "HE-cleared smoke channel duration", 3.0f,
+	true, 0.0f, true, 10.0f, on_cs2fow_float_changed);
 CConVar<bool> cs2fow_filter_teammates("cs2fow_filter_teammates", FCVAR_NONE, "Apply visibility filtering to teammates", false, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
 CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "Fixed movement lookahead before recipient RTT", 75, true, 0, true, 500);
@@ -123,6 +136,12 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 		if (error != nullptr && maxlen != 0) ismm->Format(error, maxlen, "Could not install required SourceHook hooks");
 		return false;
 	}
+	game_events_ = static_cast<IGameEventManager2 *>(ismm->VInterfaceMatch(ismm->GetEngineFactory(), k_game_event_manager_interface));
+	if (game_events_ == nullptr)
+	{
+		game_events_ = static_cast<IGameEventManager2 *>(ismm->VInterfaceMatch(ismm->GetServerFactory(), k_game_event_manager_interface));
+	}
+	he_event_available_ = game_events_ != nullptr && game_events_->AddListener(this, "hegrenade_detonate", true);
 	META_CONVAR_REGISTER(FCVAR_RELEASE | FCVAR_GAMEDLL);
 	g_SMAPI->AddListener(this, this);
 
@@ -134,7 +153,7 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 		disable(avx ? reason : "AVX and OS AVX state are required");
 		META_CONPRINTF("[CS2FOW] disabled: %s\n", disabled_reason_.c_str());
 	}
-	else if (!smoke_gamedata_available_ || !smoke_schema_available_)
+	else if (!smoke_gamedata_available_ || !smoke_schema_available_ || !he_event_available_)
 	{
 		META_CONPRINTF("[CS2FOW] smoke occlusion unavailable; wall filtering remains active\n");
 	}
@@ -144,6 +163,9 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 
 bool plugin::Unload(char *error, size_t max_length)
 {
+	if (game_events_ != nullptr) game_events_->RemoveListener(this);
+	game_events_ = nullptr;
+	he_event_available_ = false;
 	automatic_baker_.stop();
 	worker_.stop();
 	if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
@@ -152,6 +174,18 @@ bool plugin::Unload(char *error, size_t max_length)
 	check_transmit_hook_id_ = 0;
 	ConVar_Unregister();
 	return true;
+}
+
+void plugin::FireGameEvent(IGameEvent *event)
+{
+	if (event == nullptr || std::strcmp(event->GetName(), "hegrenade_detonate") != 0
+		|| !event->HasKey("x") || !event->HasKey("y") || !event->HasKey("z"))
+	{
+		return;
+	}
+	const vec3 center {event->GetFloat("x"), event->GetFloat("y"), event->GetFloat("z")};
+	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
+	he_clearance_history_.record(center, std::chrono::steady_clock::now());
 }
 
 void plugin::OnLevelInit(char const *map_name, char const *, char const *, char const *, bool, bool)
@@ -501,9 +535,11 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms snapshot_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
 		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
 		static_cast<unsigned long long>(stats.cycles));
-	const bool smoke_available = result != nullptr ? result->smoke_available : smoke_gamedata_available_ && smoke_schema_available_;
-	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u\n", cs2fow_smoke_occlusion.Get() ? 1 : 0,
-		smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count);
+	const bool smoke_available = result != nullptr ? result->smoke_available
+		: smoke_gamedata_available_ && smoke_schema_available_ && he_event_available_;
+	META_CONPRINTF("[CS2FOW] smoke enabled=%d available=%d captured=%u he_events=%d he_clears=%u\n",
+		cs2fow_smoke_occlusion.Get() ? 1 : 0, smoke_available ? 1 : 0, result == nullptr ? 0u : result->smoke_count,
+		he_event_available_ ? 1 : 0, result == nullptr ? 0u : result->he_clearance_count);
 	META_CONPRINTF("[CS2FOW] teammate filtering=%d\n", cs2fow_filter_teammates.Get() ? 1 : 0);
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
