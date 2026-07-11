@@ -108,6 +108,7 @@ void visibility_worker::run()
 		result->smoke_enabled = current.smoke_enabled;
 		result->smoke_available = current.smoke_available;
 		result->smoke_count = current.smokes == nullptr ? 0u : static_cast<uint32_t>(current.smokes->volumes.size());
+		result->he_clearance_count = current.smokes == nullptr ? 0u : current.smokes->he_clearance_count;
 		std::copy(std::begin(current.players), std::end(current.players), std::begin(result->players));
 		const float smoke_age_advance = std::max(0.0f,
 			std::chrono::duration<float>(started - current.captured).count());
@@ -146,7 +147,7 @@ void visibility_worker::run()
 						const ray_hit hit = segment_blocked(*data_, origin, ray_targets.points[point_index], cached_packets_[recipient][target][ray]);
 						cached_packets_[recipient][target][ray++] = hit.packet_index;
 						if (!hit.blocked && (!current.smoke_enabled || !current.smoke_available || current.smokes == nullptr
-							|| !smoke_line_blocked(*current.smokes, origin, ray_targets.points[point_index], smoke_age_advance)))
+							|| !smoke_line_blocked(*current.smokes, origin, ray_targets.points[point_index], smoke_age_advance, data_)))
 						{
 							blocked = false;
 							break;

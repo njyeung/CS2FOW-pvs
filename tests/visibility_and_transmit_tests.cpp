@@ -102,6 +102,17 @@ void test_visibility_pair_eligibility()
 
 void test_smoke_occlusion()
 {
+	he_clearance_history history;
+	const auto now = std::chrono::steady_clock::now();
+	assert(!history.record({std::numeric_limits<float>::quiet_NaN(), 0, 0}, now));
+	for (uint32_t index = 0; index <= k_max_he_clearances; ++index)
+	{
+		assert(history.record({static_cast<float>(index), 0, 0}, now));
+	}
+	assert(history.count == k_max_he_clearances && history.next == 1 && history.records[0].center.x == 64.0f);
+	history.clear();
+	assert(history.count == 0 && history.next == 0);
+
 	smoke_snapshot smoke;
 	smoke.volumes.reserve(2);
 	smoke.volumes.emplace_back();
@@ -139,6 +150,39 @@ void test_smoke_occlusion()
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
 	volume.age_seconds = 20.3f;
 	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}));
+
+	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
+	const bvh8_data blast_wall = test_world({
+		{{-100, 25, -100}, {100, 25, -100}, {100, 25, 100}},
+		{{-100, 25, -100}, {100, 25, 100}, {-100, 25, 100}}
+	});
+	volume.age_seconds = 2.0f;
+	volume.center = {};
+	volume.density.fill(50.0f);
+	smoke.he_clear_radius_units = 100.0f;
+	smoke.he_clear_seconds = 3.0f;
+	smoke.he_clearance_count = 1;
+	smoke.he_clearances[0] = {{0, 50, 0}, 2.999f};
+	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &blast_wall));
+	smoke.he_clearances[0].age_seconds = 3.0f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
+	smoke.he_clearances[0].age_seconds = 2.0f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 1.0f, &open));
+	smoke.he_clear_radius_units = 0.0f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
+	smoke.he_clear_radius_units = 100.0f;
+	smoke.he_clear_seconds = 0.0f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
+	smoke.he_clear_seconds = 3.0f;
+	smoke.he_clearances[0] = {{500, 0, 0}, 1.0f};
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {700, 0, 0}, 0.0f, &open));
+	smoke.he_clearances[0] = {{0, 0, 0}, 1.0f};
+	smoke.volumes.push_back(volume);
+	smoke.volumes.back().center = {500, 0, 0};
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {700, 0, 0}, 0.0f, &open));
+	smoke.volumes.resize(1);
+	smoke.he_clearance_count = 0;
 
 	std::vector<std::byte> storage(k_smoke_storage_density_offset + 2u * k_smoke_storage_frame_stride);
 	storage[k_smoke_storage_mask_offset] = std::byte {1};
@@ -470,6 +514,22 @@ void test_visibility_worker()
 	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
 	result = wait_for(10);
 	assert(result && result->visible[0][1]);
+	smokes->he_clear_radius_units = 100.0f;
+	smokes->he_clear_seconds = 3.0f;
+	smokes->he_clearance_count = 1;
+	smokes->he_clearances[0] = {{32, 0, 64}, 1.0f};
+	value.sequence = 11;
+	value.captured = std::chrono::steady_clock::now();
+	value.smoke_available = true;
+	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(11);
+	assert(result && result->visible[0][1] && result->he_clearance_count == 1);
+	smokes->he_clearances[0].age_seconds = 3.0f;
+	value.sequence = 12;
+	value.captured = std::chrono::steady_clock::now();
+	worker->submit(value, 0, {75, 1.5f, 375, 96.0f, 24.0f, 0.64f, 128.0f});
+	result = wait_for(12);
+	assert(result && !result->visible[0][1]);
 	worker->stop();
 }
 
@@ -761,6 +821,14 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 	};
 	smoke.volumes.back().age_seconds = 2.0f;
 	smoke.volumes.back().density.fill(50.0f);
+	smoke.he_clear_radius_units = 100.0f;
+	smoke.he_clear_seconds = 3.0f;
+	smoke.he_clearance_count = 4;
+	for (uint32_t index = 0; index < smoke.he_clearance_count; ++index)
+	{
+		smoke.he_clearances[index] = {{smoke.volumes.back().center.x + static_cast<float>(index) * 25.0f,
+			smoke.volumes.back().center.y, smoke.volumes.back().center.z}, 1.0f};
+	}
 
 	std::vector<uint32_t> cache(k_players * k_players * k_visibility_ray_count_max, k_invalid_ref);
 	std::array<double, 20> timings {};
@@ -795,7 +863,7 @@ double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 						const ray_hit hit = segment_blocked(data, origin, point, cached);
 						cached = hit.packet_index;
 						++ray;
-						if (!hit.blocked && !smoke_line_blocked(smoke, origin, point))
+						if (!hit.blocked && !smoke_line_blocked(smoke, origin, point, 0.0f, &data))
 						{
 							blocked = false;
 							break;

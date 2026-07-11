@@ -315,13 +315,28 @@ void plugin::refresh_entity_caches(CGameEntitySystem *system,
 }
 
 bool plugin::capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volumes> &entities, size_t count,
-	bool overflow, float game_time, visibility_snapshot &value) const
+	bool overflow, float game_time, visibility_snapshot &value)
 {
 	if (overflow || !std::isfinite(game_time))
 	{
 		return false;
 	}
 	auto snapshot = std::make_shared<smoke_snapshot>();
+	snapshot->he_clear_radius_units = cs2fow_he_clear_radius_units.Get();
+	snapshot->he_clear_seconds = cs2fow_he_clear_seconds.Get();
+	if (snapshot->he_clear_radius_units > 0.0f && snapshot->he_clear_seconds > 0.0f)
+	{
+		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
+		for (uint32_t index = 0; index < he_clearance_history_.count; ++index)
+		{
+			const live_he_clearance &clearance = he_clearance_history_.records[index];
+			const float age = std::chrono::duration<float>(value.captured - clearance.detonated).count();
+			if (age >= 0.0f && age < snapshot->he_clear_seconds)
+			{
+				snapshot->he_clearances[snapshot->he_clearance_count++] = {clearance.center, age};
+			}
+		}
+	}
 	snapshot->volumes.reserve(count);
 	for (size_t index = 0; index < count; ++index)
 	{
@@ -435,7 +450,7 @@ bool plugin::capture(visibility_snapshot &value, float game_time)
 	lock.unlock();
 	value.filter_teammates = cs2fow_filter_teammates.Get();
 	value.smoke_enabled = cs2fow_smoke_occlusion.Get();
-	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_;
+	value.smoke_available = smoke_schema_available_ && smoke_gamedata_available_ && he_event_available_;
 	if (value.smoke_enabled && value.smoke_available
 		&& !capture_smokes(smoke_entities, smoke_count, smoke_overflow, game_time, value))
 	{

@@ -95,6 +95,8 @@ When a living enemy is fully behind solid map geometry, CS2FOW may remove that e
 
 This removes the main live position data used by wallhacks. It does not make every form of cheating impossible: sound, teammate information, last-known positions, and other game clues still exist.
 
+Live smoke also blocks visibility rays. An HE detonation opens a 100-unit viewing channel through an affected smoke for three seconds by default. Baked walls between the blast and sight line still block that opening, and overlapping smoke clouds are checked separately.
+
 HLTV, spectators, dead players, and a player viewing themself are not filtered. Teammates remain unfiltered by default; `cs2fow_filter_teammates 1` applies the same visibility rules to their complete visual groups and may also remove client-side teammate markers and radar information.
 
 ## The six-step runtime flow
@@ -137,6 +139,8 @@ Defaults in `cfg/cs2fow.cfg` are:
 | --- | ---: | --- |
 | `cs2fow_enable` | `1` | Enable filtering when all required data is valid. |
 | `cs2fow_smoke_occlusion` | `1` | Use CS2's live smoke grid. Smoke alone fails open if private smoke data is unavailable. |
+| `cs2fow_he_clear_radius_units` | `100` | Radius of the temporary viewing channel created by an HE. Set to `0` to disable HE clearing. |
+| `cs2fow_he_clear_seconds` | `3.0` | Seconds before an HE-created viewing channel closes. Set to `0` to disable HE clearing. |
 | `cs2fow_filter_teammates` | `0` | Apply the same visibility filtering to living teammates. |
 | `cs2fow_update_interval_ms` | `1` | Minimum time between player snapshots sent to the worker. |
 | `cs2fow_base_lookahead_ms` | `75` | Fixed movement lookahead before the RTT contribution. |
@@ -149,13 +153,13 @@ Defaults in `cfg/cs2fow.cfg` are:
 | `cs2fow_visibility_hold_ms` | `16` | Minimum time a newly visible pair stays visible. |
 | `cs2fow_debug` | `0` | Collect real primary-list clears for later inspection. |
 
-Existing custom configs must update the previous `50`/`150` lookahead defaults and add the RTT, prediction-distance, and shoulder controls shown above. Older configs must also replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms` and remove `cs2fow_peek_margin_units`.
+Existing custom configs must add the two HE-clearance controls shown above. They must also update the previous `50`/`150` lookahead defaults and add the RTT, prediction-distance, and shoulder controls. Older configs must replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms` and remove `cs2fow_peek_margin_units`.
 
 Automatic baking needs write access to `addons/cs2fow/data/maps`. On Linux, the packaged baker and VRF program must remain executable.
 
 ## Status and debug commands
 
-`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, smoke availability and count, teammate-filtering state, and automatic-bake progress.
+`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, smoke and HE-event availability, active HE clearances, teammate-filtering state, and automatic-bake progress.
 
 `cs2fow_debug 1` starts silent evidence collection. It adds a record only when CS2FOW found a primary transmit bit set immediately before clearing it. It does not print every clear.
 
