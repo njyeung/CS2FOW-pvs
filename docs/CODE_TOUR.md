@@ -100,14 +100,14 @@ The game thread runs `hook_game_frame`. At most once per configured interval (de
 
 For each living enemy pair the worker:
 
-- makes ten recipient origins: eye, safe predicted eye, left/right shoulders, predicted shoulders, up/down, and predicted up/down;
-- makes target samples from eight padded AABB corners, fifteen tuned body points, and a held-weapon muzzle point;
-- adds current and future body/muzzle samples and a merged current/future box when the target's predicted path is not blocked;
-- casts at most `10 x 40 = 400` rays, stopping at the first open ray;
+- makes eight recipient origins: current/predicted eye, left/right shoulders, predicted shoulders, and current/predicted upward points;
+- makes target samples from padded AABB corners, fifteen tuned body points, and a held-weapon muzzle point;
+- clips movement at baked walls and adds separate current/future boxes, body points, and muzzle points when useful movement remains;
+- casts at most `8 x 48 = 384` rays, stopping at the first open ray;
 - first tries the triangle packet that blocked the same pair's earlier ray, then traverses the BVH8 if needed; and
 - holds a newly open pair visible for `cs2fow_visibility_hold_ms`.
 
-The finished immutable result contains its sequence, copied player identity, visibility matrix, completion time, timing, and pair counts. Publishing swaps a shared result; it never exposes a half-written matrix.
+The finished immutable result contains its sequence, capture/completion times, recipient lookahead, copied player identity, visibility matrix, timing, and pair counts. Publishing swaps a shared result; it never exposes a half-written matrix.
 
 ## CheckTransmit flow
 

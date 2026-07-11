@@ -55,7 +55,7 @@ They are not visibility blockers in the current preview. CS2FOW checks baked sta
 
 ### How does it avoid enemies appearing too late around corners?
 
-The worker checks body points, bounding-box corners, and the held weapon muzzle. For movement at 100 units per second or faster, it checks where the players could be after a 50 ms base delay plus half of the recipient's current round-trip latency. The default lookahead is capped at 150 ms, and a 32 ms hold reduces corner flicker.
+The worker checks body points, bounding-box corners, and the held weapon muzzle. Movement prediction starts gradually above 75 units per second and is fully active at 100. It looks ahead by 75 ms plus 1.5 times the recipient's current round-trip latency, capped at 375 ms and 96 movement units per player. A 16 ms hold reduces one-tick corner flicker.
 
 When the worker sees an enemy again, CS2FOW stops removing that enemy from normal snapshots immediately.
 
@@ -102,7 +102,7 @@ HLTV, spectators, dead players, teammates, and a player viewing themself are not
 1. **Load map:** find the mounted map VPK and identify its physics data.
 2. **Bake walls:** turn static collision triangles into a compact bounding volume hierarchy with eight children per node (BVH8).
 3. **Collect player points:** copy each living player's position, movement, body bounds, eye direction, latency, and held-weapon class on the game thread.
-4. **Cast rays:** a background worker checks eight safe recipient points against up to forty target points. Targets include eight axis-aligned bounding box corners, fifteen custom body points, and a weapon-muzzle point, with current and predicted positions when movement prediction is safe.
+4. **Cast rays:** a background worker checks eight safe recipient points against up to forty-eight target points. Targets include separate current and future axis-aligned bounding box corners, fifteen custom body points, and a weapon-muzzle point. Future positions stop at baked walls instead of passing through them.
 5. **Decide visibility:** one open ray reveals the target. A short hold keeps a recently revealed target visible to reduce corner pop-in.
 6. **Withhold hidden entities:** `CheckTransmit` reads the finished decision and clears only the verified primary transmit-list bits for a hidden enemy's visual group.
 
@@ -137,18 +137,20 @@ Defaults in `cfg/cs2fow.cfg` are:
 | --- | ---: | --- |
 | `cs2fow_enable` | `1` | Enable filtering when all required data is valid. |
 | `cs2fow_update_interval_ms` | `1` | Minimum time between player snapshots sent to the worker. |
-| `cs2fow_base_lookahead_ms` | `50` | Lookahead before half of the recipient's current round-trip latency is added. |
-| `cs2fow_max_lookahead_ms` | `150` | Maximum movement/latency lookahead. Set to `0` to disable lookahead. |
-| `cs2fow_visibility_hold_ms` | `32` | Minimum time a newly visible pair stays visible. |
+| `cs2fow_base_lookahead_ms` | `75` | Fixed movement lookahead before the RTT contribution. |
+| `cs2fow_rtt_lookahead_scale` | `1.5` | Multiplier applied to the recipient's current round-trip latency. |
+| `cs2fow_max_lookahead_ms` | `375` | Maximum movement/latency lookahead. Set to `0` to disable movement prediction. |
+| `cs2fow_max_prediction_units` | `96` | Maximum predicted movement for each player. Set to `0` to disable movement prediction. |
+| `cs2fow_visibility_hold_ms` | `16` | Minimum time a newly visible pair stays visible. |
 | `cs2fow_debug` | `0` | Collect real primary-list clears for later inspection. |
 
-Existing custom configs must replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms` and remove `cs2fow_peek_margin_units`.
+Existing custom configs must update the previous `50`/`150` lookahead defaults and add `cs2fow_rtt_lookahead_scale` and `cs2fow_max_prediction_units`. Older configs must also replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms` and remove `cs2fow_peek_margin_units`.
 
 Automatic baking needs write access to `addons/cs2fow/data/maps`. On Linux, the packaged baker and VRF program must remain executable.
 
 ## Status and debug commands
 
-`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, result age, pair counts, and automatic-bake progress.
+`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker timings, true snapshot age, pair counts, and automatic-bake progress.
 
 `cs2fow_debug 1` starts silent evidence collection. It adds a record only when CS2FOW found a primary transmit bit set immediately before clearing it. It does not print every clear.
 
@@ -169,7 +171,7 @@ Records show the classname, relationship to the pawn (`direct`, `owner_link`, `e
 Important limits:
 
 - Visibility uses baked static map geometry. Smokes, doors, breakables, props, particles, projectiles, and other moving blockers are not occluders.
-- Movement prediction targets normal competitive/casual CS2 movement. Horizontal speed is ignored below 100 units per second and capped at 350 for prediction, so surf, KZ, and unusually fast boosts can appear late.
+- Movement prediction targets normal competitive/casual CS2 movement. It ramps from zero between 75 and 100 horizontal units per second, caps speed at 350, and caps each player's offset at 96 units, so surf, KZ, and unusually fast boosts can appear late.
 - Sound events, bomb information, teammate information, and other non-entity clues are not filtered.
 - Version 2 and older BVH8 files are rejected. The plugin automatically rebakes when it can and remains fail open otherwise.
 - `CheckTransmit` changes only `m_pTransmitEntity`, the verified primary send list. Full-update snapshots are never filtered.

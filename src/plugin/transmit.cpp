@@ -171,7 +171,6 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		return;
 	}
 	const std::shared_ptr<const visibility_result> result = worker_.result();
-	const auto stale_after = std::chrono::milliseconds(std::max(100, 3 * cs2fow_update_interval_ms.Get()));
 	const auto now = std::chrono::steady_clock::now();
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 	for (int i = 0; i < count; ++i)
@@ -192,7 +191,7 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 			hidden_group_clear(group);
 		}
 	}
-	if (!result || now - result->completed > stale_after)
+	if (!result || !visibility_snapshot_fresh(result->captured, now, 0.0f))
 	{
 		return;
 	}
@@ -236,7 +235,8 @@ void plugin::hook_check_transmit(CCheckTransmitInfo **infos, int count, CBitVec<
 		int slot = -1;
 		std::memcpy(&slot, reinterpret_cast<const char *>(info) + recipient_slot_offset_, sizeof(slot));
 		if (slot < 0 || slot >= static_cast<int>(k_max_players) || read_checktransmit_full_update(info, transmit_offsets_.full_update_offset)
-			|| !result->players[slot].valid)
+			|| !result->players[slot].valid
+			|| !visibility_snapshot_fresh(result->captured, now, result->recipient_lookahead_seconds[slot]))
 		{
 			continue;
 		}

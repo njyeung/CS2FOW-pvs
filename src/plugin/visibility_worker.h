@@ -46,14 +46,27 @@ struct visibility_snapshot
 struct visibility_result
 {
 	uint64_t sequence {};
+	std::chrono::steady_clock::time_point captured;
 	std::chrono::steady_clock::time_point completed;
 	player_state players[k_max_players];
+	float recipient_lookahead_seconds[k_max_players] {};
 	bool visible[k_max_players][k_max_players] {};
 	double worker_ms {};
 	uint32_t evaluated_pairs {};
 	uint32_t visible_pairs {};
 	uint32_t hidden_pairs {};
 };
+
+inline bool visibility_snapshot_fresh(std::chrono::steady_clock::time_point captured,
+	std::chrono::steady_clock::time_point now, float lookahead_seconds)
+{
+	const auto age = now - captured;
+	if (age > std::chrono::milliseconds(100))
+	{
+		return false;
+	}
+	return lookahead_seconds <= 0.0f || age < std::chrono::duration<float>(lookahead_seconds);
+}
 
 struct worker_stats
 {

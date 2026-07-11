@@ -103,6 +103,7 @@ void visibility_worker::run()
 		const auto started = std::chrono::steady_clock::now();
 		auto result = std::make_shared<visibility_result>();
 		result->sequence = current.sequence;
+		result->captured = current.captured;
 		std::copy(std::begin(current.players), std::end(current.players), std::begin(result->players));
 		std::array<float, k_max_players> recipient_lookahead {};
 		std::array<std::array<vec3, k_visibility_origin_count>, k_max_players> recipient_origins {};
@@ -111,7 +112,9 @@ void visibility_worker::run()
 			if (current.players[recipient].valid)
 			{
 				recipient_lookahead[recipient] = visibility_effective_lookahead_seconds(current.players[recipient].rtt_seconds, tuning);
-				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]), recipient_lookahead[recipient]);
+				result->recipient_lookahead_seconds[recipient] = recipient_lookahead[recipient];
+				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]),
+					recipient_lookahead[recipient], tuning.max_prediction_units);
 			}
 		}
 		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)
@@ -128,7 +131,7 @@ void visibility_worker::run()
 				++result->evaluated_pairs;
 				bool blocked = true;
 				const auto &ray_origins = recipient_origins[recipient];
-				const auto ray_targets = visibility_targets(*data_, sample_player(to), recipient_lookahead[recipient]);
+				const auto ray_targets = visibility_targets(*data_, sample_player(to), recipient_lookahead[recipient], tuning.max_prediction_units);
 				uint32_t ray = 0;
 				for (const vec3 &origin : ray_origins)
 				{

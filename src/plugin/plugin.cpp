@@ -50,9 +50,11 @@ void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new
 
 CConVar<bool> cs2fow_enable("cs2fow_enable", FCVAR_NONE, "Enable CS2FOW when map data is valid", true, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
-CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "Lookahead before half of recipient RTT is added", 50, true, 0, true, 500);
-CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum movement and latency lookahead", 150, true, 0, true, 500);
-CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 32, true, 0, true, 1000);
+CConVar<int> cs2fow_base_lookahead_ms("cs2fow_base_lookahead_ms", FCVAR_NONE, "Fixed movement lookahead before recipient RTT", 75, true, 0, true, 500);
+CConVar<float> cs2fow_rtt_lookahead_scale("cs2fow_rtt_lookahead_scale", FCVAR_NONE, "Recipient RTT multiplier for movement lookahead", 1.5f, true, 0.0f, true, 4.0f);
+CConVar<int> cs2fow_max_lookahead_ms("cs2fow_max_lookahead_ms", FCVAR_NONE, "Maximum movement and latency lookahead", 375, true, 0, true, 500);
+CConVar<float> cs2fow_max_prediction_units("cs2fow_max_prediction_units", FCVAR_NONE, "Maximum predicted movement per player", 96.0f, true, 0.0f, true, 256.0f);
+CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 16, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
 
 CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
@@ -436,7 +438,9 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	last_snapshot_ = now;
 	worker_.submit(std::move(value), static_cast<uint32_t>(cs2fow_visibility_hold_ms.Get()), {
 		static_cast<uint32_t>(cs2fow_base_lookahead_ms.Get()),
-		static_cast<uint32_t>(cs2fow_max_lookahead_ms.Get())
+		cs2fow_rtt_lookahead_scale.Get(),
+		static_cast<uint32_t>(cs2fow_max_lookahead_ms.Get()),
+		cs2fow_max_prediction_units.Get()
 	});
 }
 
@@ -444,12 +448,12 @@ void plugin::print_status() const
 {
 	const worker_stats stats = worker_.stats();
 	const std::shared_ptr<const visibility_result> result = worker_.result();
-	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->completed).count() : -1.0;
+	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->captured).count() : -1.0;
 	META_CONPRINTF("[CS2FOW] %s; map=%s crc=0x%08x version=%u triangles=%u nodes=%u packets=%u bytes=%llu depth=%u\n",
 		disabled_reason_.empty() && cs2fow_enable.Get() ? "active" : (disabled_reason_.empty() ? "disabled by convar" : disabled_reason_.c_str()), map_.c_str(),
 		data_.header.source_crc32, data_.header.version, data_.header.triangle_count, data_.header.node_count, data_.header.packet_count,
 		static_cast<unsigned long long>(data_.header.file_size), data_.header.max_depth);
-	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms result_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
+	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms snapshot_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
 		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
 		static_cast<unsigned long long>(stats.cycles));
 	std::string bake_map;

@@ -226,7 +226,9 @@ extern plugin g_plugin;
 extern CConVar<bool> cs2fow_enable;
 extern CConVar<int> cs2fow_update_interval_ms;
 extern CConVar<int> cs2fow_base_lookahead_ms;
+extern CConVar<float> cs2fow_rtt_lookahead_scale;
 extern CConVar<int> cs2fow_max_lookahead_ms;
+extern CConVar<float> cs2fow_max_prediction_units;
 extern CConVar<int> cs2fow_visibility_hold_ms;
 extern CConVar<bool> cs2fow_debug;
 

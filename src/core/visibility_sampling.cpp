@@ -1,8 +1,8 @@
 #include "visibility_sampling.h"
 
 // Builds current/predicted eye, body, axis-aligned box, and weapon-muzzle points
-// from copied player numbers. Unsafe prediction stays at the current position;
-// all returned counts remain inside fixed arrays used by the worker.
+// from copied player numbers. Movement prediction stops at baked walls; all
+// returned counts remain inside fixed arrays used by the worker.
 
 #include <algorithm>
 #include <cmath>
@@ -13,13 +13,14 @@ namespace
 {
 
 constexpr float k_max_prediction_speed = 350.0f;
-constexpr float k_min_prediction_speed = 100.0f;
-constexpr float k_base_bounds_padding = 4.0f;
-constexpr float k_predicted_bounds_padding = 8.0f;
+constexpr float k_prediction_ramp_start_speed = 75.0f;
+constexpr float k_prediction_ramp_full_speed = 100.0f;
+constexpr float k_horizontal_bounds_padding = 8.0f;
+constexpr float k_top_bounds_padding = 8.0f;
 constexpr float k_shoulder_origin_offset = 24.0f;
 constexpr float k_vertical_origin_offset = 24.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
-constexpr float k_rtt_lookahead_scale = 0.5f;
+constexpr uint32_t k_wall_clip_steps = 8;
 constexpr float k_degrees_to_radians = 0.017453292519943295769f;
 constexpr float k_standing_player_height = 72.0f;
 constexpr float k_pelvis_height = 38.0f;
@@ -83,19 +84,15 @@ vec3 eye_forward(float yaw_degrees)
 	return {std::cos(yaw), std::sin(yaw), 0.0f};
 }
 
-bounds player_bounds(const visibility_player &player, vec3 origin, float padding)
+bounds player_bounds(const visibility_player &player, vec3 origin)
 {
 	return {
-		{origin.x + player.mins.x - padding, origin.y + player.mins.y - padding, origin.z + player.mins.z - padding},
-		{origin.x + player.maxs.x + padding, origin.y + player.maxs.y + padding, origin.z + player.maxs.z + padding}
-	};
-}
-
-bounds merge(bounds a, bounds b)
-{
-	return {
-		{std::min(a.min.x, b.min.x), std::min(a.min.y, b.min.y), std::min(a.min.z, b.min.z)},
-		{std::max(a.max.x, b.max.x), std::max(a.max.y, b.max.y), std::max(a.max.z, b.max.z)}
+		{origin.x + player.mins.x - k_horizontal_bounds_padding,
+			origin.y + player.mins.y - k_horizontal_bounds_padding,
+			origin.z + player.mins.z},
+		{origin.x + player.maxs.x + k_horizontal_bounds_padding,
+			origin.y + player.maxs.y + k_horizontal_bounds_padding,
+			origin.z + player.maxs.z + k_top_bounds_padding}
 	};
 }
 
@@ -191,25 +188,52 @@ float visibility_effective_lookahead_seconds(float rtt_seconds, const visibility
 		return 0.0f;
 	}
 	const float rtt_ms = std::max(0.0f, rtt_seconds) * 1000.0f;
-	const float wanted_ms = static_cast<float>(tuning.base_lookahead_ms) + rtt_ms * k_rtt_lookahead_scale;
+	const float wanted_ms = static_cast<float>(tuning.base_lookahead_ms)
+		+ rtt_ms * std::max(0.0f, tuning.rtt_lookahead_scale);
 	return std::clamp(wanted_ms, 0.0f, static_cast<float>(tuning.max_lookahead_ms)) / 1000.0f;
 }
 
-vec3 visibility_prediction_offset(vec3 velocity, float seconds)
+vec3 visibility_prediction_offset(vec3 velocity, float seconds, float max_prediction_units)
 {
-	if (seconds <= 0.0f)
+	if (seconds <= 0.0f || max_prediction_units <= 0.0f)
 	{
 		return {};
 	}
 	const float speed = std::sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
-	if (speed < k_min_prediction_speed)
+	if (speed <= k_prediction_ramp_start_speed)
 	{
 		return {};
 	}
 	const float capped_speed = std::min(speed, k_max_prediction_speed);
-	const float distance = capped_speed * seconds;
+	const float activation = std::clamp((speed - k_prediction_ramp_start_speed)
+		/ (k_prediction_ramp_full_speed - k_prediction_ramp_start_speed), 0.0f, 1.0f);
+	const float distance = std::min(capped_speed * seconds * activation, max_prediction_units);
 	const float scale = distance / speed;
 	return {velocity.x * scale, velocity.y * scale, 0.0f};
+}
+
+vec3 visibility_clip_destination(const bvh8_data &data, vec3 origin, vec3 destination)
+{
+	if (distance_sq(origin, destination) <= k_same_point_epsilon_sq
+		|| !segment_blocked(data, origin, destination).blocked)
+	{
+		return destination;
+	}
+	vec3 clear = origin;
+	vec3 blocked = destination;
+	for (uint32_t step = 0; step < k_wall_clip_steps; ++step)
+	{
+		const vec3 middle = scale(add(clear, blocked), 0.5f);
+		if (segment_blocked(data, origin, middle).blocked)
+		{
+			blocked = middle;
+		}
+		else
+		{
+			clear = middle;
+		}
+	}
+	return clear;
 }
 
 weapon_muzzle_class weapon_muzzle_class_from_item_definition(uint16_t item_definition)
@@ -271,9 +295,11 @@ float weapon_muzzle_length(weapon_muzzle_class value)
 	}
 }
 
-std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player, float lookahead_seconds)
+std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &data, const visibility_player &player,
+	float lookahead_seconds, float max_prediction_units)
 {
-	const vec3 predicted = add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds));
+	const vec3 predicted = visibility_clip_destination(data, player.eye,
+		add(player.eye, visibility_prediction_offset(player.velocity, lookahead_seconds, max_prediction_units)));
 	const vec3 shoulder = scale(eye_right(player.eye_yaw_degrees), k_shoulder_origin_offset);
 	const vec3 left = subtract(player.eye, shoulder);
 	const vec3 right = add(player.eye, shoulder);
@@ -284,34 +310,34 @@ std::array<vec3, k_visibility_origin_count> visibility_origins(const bvh8_data &
 	const vec3 predicted_up = add(predicted, vertical);
 	return {
 		player.eye,
-		safe_origin(data, player.eye, predicted),
+		predicted,
 		safe_origin(data, player.eye, left),
 		safe_origin(data, player.eye, right),
-		safe_origin(data, player.eye, predicted_left),
-		safe_origin(data, player.eye, predicted_right),
+		safe_origin(data, predicted, predicted_left),
+		safe_origin(data, predicted, predicted_right),
 		safe_origin(data, player.eye, up),
-		safe_origin(data, player.eye, predicted_up)
+		safe_origin(data, predicted, predicted_up)
 	};
 }
 
-visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player, float lookahead_seconds)
+visibility_target_points visibility_targets(const bvh8_data &data, const visibility_player &player,
+	float lookahead_seconds, float max_prediction_units)
 {
 	visibility_target_points targets;
-	const vec3 offset = visibility_prediction_offset(player.velocity, lookahead_seconds);
-	bool predicted = false;
+	const vec3 offset = visibility_prediction_offset(player.velocity, lookahead_seconds, max_prediction_units);
+	vec3 future_origin = player.origin;
 	if (distance_sq({}, offset) > k_same_point_epsilon_sq)
 	{
-		const bounds current_check = player_bounds(player, player.origin, k_base_bounds_padding);
-		const bounds future_check = player_bounds(player, add(player.origin, offset), k_base_bounds_padding);
-		predicted = !segment_blocked(data, center(current_check), center(future_check)).blocked;
+		const vec3 current_center = center(player_bounds(player, player.origin));
+		const vec3 future_center = visibility_clip_destination(data, current_center, add(current_center, offset));
+		future_origin = add(player.origin, subtract(future_center, current_center));
 	}
+	const bool predicted = distance_sq(player.origin, future_origin) > k_same_point_epsilon_sq;
 
 	if (predicted)
 	{
-		const vec3 future_origin = add(player.origin, offset);
-		add_aabb_corners(targets, merge(
-			player_bounds(player, player.origin, k_predicted_bounds_padding),
-			player_bounds(player, future_origin, k_predicted_bounds_padding)));
+		add_aabb_corners(targets, player_bounds(player, player.origin));
+		add_aabb_corners(targets, player_bounds(player, future_origin));
 		add_body_points(targets, player, player.origin);
 		add_body_points(targets, player, future_origin);
 		add_muzzle_point(targets, player, player.origin);
@@ -319,7 +345,7 @@ visibility_target_points visibility_targets(const bvh8_data &data, const visibil
 	}
 	else
 	{
-		add_aabb_corners(targets, player_bounds(player, player.origin, k_base_bounds_padding));
+		add_aabb_corners(targets, player_bounds(player, player.origin));
 		add_body_points(targets, player, player.origin);
 		add_muzzle_point(targets, player, player.origin);
 	}
