@@ -6,209 +6,705 @@
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1">
 	<link rel="icon" href="data:,">
-	<title>CS2FOW line-of-sight point editor</title>
+	<title>CS2FOW Visibility Studio</title>
 	<style>
 		:root {
-			color-scheme: dark;
-			font-family: Segoe UI, Arial, sans-serif;
-			background: #0b0e12;
-			color: #f4f7fb;
+			color-scheme: light;
+			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			--ink: #151618;
+			--muted: #686b70;
+			--quiet: #8d9095;
+			--line: rgba(26, 28, 31, 0.12);
+			--surface: rgba(255, 255, 255, 0.78);
+			--surface-solid: #f8f8f7;
+			--surface-strong: rgba(255, 255, 255, 0.94);
+			--red: #df1f2d;
+			--red-dark: #b61020;
+			--green: #16794c;
+			--shadow: 0 22px 60px rgba(35, 38, 42, 0.13), 0 2px 10px rgba(35, 38, 42, 0.06);
+			--radius: 22px;
+			--edge: clamp(14px, 1.5vw, 28px);
+			--left-width: clamp(280px, 20vw, 320px);
+			--right-width: clamp(370px, 25vw, 420px);
 		}
 		* {
 			box-sizing: border-box;
 		}
+		html, body {
+			width: 100%;
+			height: 100%;
+		}
 		body {
 			margin: 0;
+			min-width: 1100px;
 			overflow: hidden;
+			background: #eceeed;
+			color: var(--ink);
+		}
+		button, input, select {
+			font: inherit;
+		}
+		button {
+			color: inherit;
+		}
+		button:focus-visible, input:focus-visible, select:focus-visible {
+			outline: 3px solid rgba(223, 31, 45, 0.24);
+			outline-offset: 2px;
+		}
+		button:disabled {
+			cursor: not-allowed;
+			opacity: 0.42;
 		}
 		#view {
+			position: fixed;
+			inset: 0;
 			display: block;
 			width: 100vw;
 			height: 100vh;
+			z-index: 0;
 		}
-		.panel {
+		.floating {
+			z-index: 3;
+			border: 1px solid rgba(255, 255, 255, 0.72);
+			background: var(--surface);
+			box-shadow: var(--shadow);
+			backdrop-filter: blur(28px) saturate(135%);
+			-webkit-backdrop-filter: blur(28px) saturate(135%);
+		}
+		.topbar {
 			position: fixed;
-			inset: 16px 16px 16px auto;
-			width: min(390px, calc(100vw - 32px));
-			overflow: auto;
-			padding: 12px;
-			border: 1px solid #2b3442;
-			background: rgba(12, 16, 22, 0.94);
+			top: var(--edge);
+			left: var(--edge);
+			right: var(--edge);
+			height: 68px;
+			display: flex;
+			align-items: center;
+			gap: 18px;
+			padding: 10px 12px 10px 14px;
+			border-radius: 24px;
 		}
-		h1 {
-			margin: 0 0 8px;
-			font-size: 20px;
-			letter-spacing: 0;
+		.brand {
+			display: flex;
+			align-items: center;
+			gap: 11px;
+			min-width: 255px;
 		}
-		fieldset {
-			margin: 0 0 10px;
-			padding: 9px;
-			border: 1px solid #303a48;
+		.brand-mark {
+			position: relative;
+			width: 38px;
+			height: 38px;
+			flex: 0 0 38px;
+			border-radius: 12px;
+			background: linear-gradient(145deg, #ef3340, var(--red-dark));
+			box-shadow: 0 8px 18px rgba(223, 31, 45, 0.24);
 		}
-		legend {
-			padding: 0 6px;
-			font-weight: 700;
+		.brand-mark::before {
+			content: "";
+			position: absolute;
+			left: 9px;
+			top: 12px;
+			width: 18px;
+			height: 11px;
+			border: 2px solid #fff;
+			border-radius: 55% 45% 55% 45%;
+			transform: rotate(-10deg);
 		}
-		label {
-			display: block;
-			margin: 8px 0;
-			font-size: 13px;
-			color: #cbd5e1;
+		.brand-mark::after {
+			content: "";
+			position: absolute;
+			left: 16px;
+			top: 16px;
+			width: 6px;
+			height: 6px;
+			border-radius: 50%;
+			background: #fff;
 		}
-		input, button {
-			font: inherit;
+		.brand-name {
+			font-size: 17px;
+			font-weight: 760;
+			letter-spacing: -0.025em;
 		}
-		input[type="number"], input[type="range"] {
-			width: 100%;
+		.brand-subtitle {
+			margin-top: 2px;
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 560;
+			letter-spacing: 0.04em;
+			text-transform: uppercase;
 		}
-		input[type="file"] {
-			width: 100%;
+		.health {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin-left: auto;
 		}
-		.hidden-file {
+		.pill {
+			min-height: 32px;
+			display: inline-flex;
+			align-items: center;
+			gap: 7px;
+			padding: 0 11px;
+			border: 1px solid var(--line);
+			border-radius: 999px;
+			background: rgba(248, 248, 247, 0.75);
+			color: var(--muted);
+			font-size: 12px;
+			font-weight: 650;
+			white-space: nowrap;
+		}
+		.pill::before {
+			content: "";
+			width: 7px;
+			height: 7px;
+			border-radius: 50%;
+			background: #9b9da1;
+		}
+		.pill.ok {
+			color: var(--green);
+		}
+		.pill.ok::before, .pill.ready::before {
+			background: #24a66a;
+		}
+		.pill.bad {
+			color: var(--red-dark);
+		}
+		.pill.bad::before {
+			background: var(--red);
+		}
+		.header-actions {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+		.button {
+			min-height: 38px;
+			padding: 0 14px;
+			border: 1px solid var(--line);
+			border-radius: 12px;
+			background: rgba(255, 255, 255, 0.72);
+			font-size: 12px;
+			font-weight: 680;
+			letter-spacing: -0.005em;
+			cursor: pointer;
+			transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+		}
+		.button:hover:not(:disabled) {
+			border-color: rgba(24, 26, 29, 0.24);
+			background: #fff;
+			box-shadow: 0 6px 16px rgba(35, 38, 42, 0.08);
+			transform: translateY(-1px);
+		}
+		.button:active:not(:disabled) {
+			transform: translateY(0);
+		}
+		.button.primary {
+			border-color: transparent;
+			background: var(--red);
+			color: #fff;
+			box-shadow: 0 8px 18px rgba(223, 31, 45, 0.2);
+		}
+		.button.primary:hover:not(:disabled) {
+			background: var(--red-dark);
+		}
+		.button.danger {
+			color: var(--red-dark);
+		}
+		.export-wrap {
+			position: relative;
+		}
+		.export-menu {
+			position: absolute;
+			top: calc(100% + 8px);
+			right: 0;
+			width: 176px;
+			padding: 6px;
+			border: 1px solid rgba(24, 26, 29, 0.1);
+			border-radius: 14px;
+			background: rgba(255, 255, 255, 0.96);
+			box-shadow: 0 18px 40px rgba(35, 38, 42, 0.16);
+			backdrop-filter: blur(24px);
+		}
+		.export-menu[hidden] {
 			display: none;
 		}
-		button {
-			min-height: 32px;
-			border: 1px solid #435064;
-			background: #17202b;
-			color: #f4f7fb;
+		.export-menu button {
+			width: 100%;
+			min-height: 36px;
+			padding: 0 10px;
+			border: 0;
+			border-radius: 9px;
+			background: transparent;
+			text-align: left;
+			font-size: 12px;
+			font-weight: 620;
 			cursor: pointer;
 		}
-		button:hover {
-			background: #223043;
+		.export-menu button:hover, .export-menu button:focus-visible {
+			background: #f1f1ef;
 		}
-		.row {
+		.card {
+			position: fixed;
+			top: calc(var(--edge) + 86px);
+			bottom: 78px;
+			display: flex;
+			flex-direction: column;
+			min-height: 0;
+			border-radius: var(--radius);
+			overflow: hidden;
+		}
+		.scene-card {
+			left: var(--edge);
+			width: var(--left-width);
+		}
+		.points-card {
+			right: var(--edge);
+			width: var(--right-width);
+		}
+		.card-header {
+			display: flex;
+			align-items: flex-start;
+			justify-content: space-between;
+			gap: 12px;
+			padding: 20px 20px 14px;
+		}
+		.eyebrow {
+			margin: 0 0 5px;
+			color: var(--red);
+			font-size: 10px;
+			font-weight: 760;
+			letter-spacing: 0.12em;
+			text-transform: uppercase;
+		}
+		h1, h2, h3, p {
+			margin-top: 0;
+		}
+		h1, h2 {
+			margin-bottom: 0;
+			font-size: 21px;
+			line-height: 1.1;
+			letter-spacing: -0.035em;
+		}
+		h3 {
+			margin-bottom: 12px;
+			font-size: 13px;
+			letter-spacing: -0.015em;
+		}
+		.count-badge {
+			padding: 6px 9px;
+			border-radius: 999px;
+			background: #ececea;
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 700;
+			white-space: nowrap;
+		}
+		.segmented {
 			display: grid;
 			grid-template-columns: repeat(3, 1fr);
-			gap: 8px;
+			gap: 4px;
+			margin: 0 16px 14px;
+			padding: 4px;
+			border-radius: 13px;
+			background: rgba(226, 227, 225, 0.8);
 		}
-		.actions {
-			display: grid;
-			grid-template-columns: repeat(3, 1fr);
-			gap: 8px;
+		.segmented button {
+			min-height: 32px;
+			border: 0;
+			border-radius: 9px;
+			background: transparent;
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 700;
+			cursor: pointer;
+			transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 		}
-		.actions.compact {
-			grid-template-columns: repeat(2, 1fr);
+		.segmented button[aria-pressed="true"] {
+			background: #fff;
+			box-shadow: 0 2px 8px rgba(35, 38, 42, 0.09);
+			color: var(--ink);
 		}
-		table {
-			width: 100%;
-			border-collapse: collapse;
-			font-size: 12px;
+		.scene-content {
+			min-height: 0;
+			overflow: auto;
+			padding: 0 18px 20px;
 		}
-		th, td {
-			border-bottom: 1px solid #242d38;
-			padding: 5px;
-			text-align: left;
+		.scene-panel[hidden] {
+			display: none;
 		}
-		tr.selected {
-			background: #233247;
+		.section-block {
+			padding: 16px;
+			border: 1px solid var(--line);
+			border-radius: 16px;
+			background: rgba(255, 255, 255, 0.55);
 		}
-		td input {
-			width: 70px;
-			border: 1px solid #384557;
-			background: #0f151d;
-			color: #f4f7fb;
-		}
-		.status {
-			white-space: pre-wrap;
-			color: #9fb1c7;
-			font-size: 12px;
-			line-height: 1.45;
-		}
-		.ok {
-			color: #79d986;
-		}
-		.bad {
-			color: #ff7777;
+		.section-block + .section-block {
+			margin-top: 12px;
 		}
 		.hint {
-			color: #94a3b8;
+			margin-bottom: 14px;
+			color: var(--muted);
+			font-size: 11px;
+			line-height: 1.5;
+		}
+		.field {
+			display: block;
+			margin-bottom: 13px;
+			color: var(--muted);
+			font-size: 11px;
+			font-weight: 620;
+		}
+		.field:last-child {
+			margin-bottom: 0;
+		}
+		.field span {
+			display: flex;
+			justify-content: space-between;
+			margin-bottom: 6px;
+		}
+		input[type="number"], input[type="text"], select {
+			width: 100%;
+			height: 38px;
+			padding: 0 10px;
+			border: 1px solid rgba(24, 26, 29, 0.13);
+			border-radius: 10px;
+			background: rgba(255, 255, 255, 0.8);
+			color: var(--ink);
 			font-size: 12px;
-			line-height: 1.45;
+			transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+		}
+		input[type="number"]:focus, input[type="text"]:focus, select:focus {
+			border-color: rgba(223, 31, 45, 0.52);
+			background: #fff;
+		}
+		input[type="range"] {
+			width: 100%;
+			accent-color: var(--red);
+		}
+		.grid-3 {
+			display: grid;
+			grid-template-columns: repeat(3, 1fr);
+			gap: 8px;
+		}
+		.grid-3 .field {
+			margin-bottom: 10px;
+		}
+		.inline-actions {
+			display: flex;
+			gap: 8px;
+			margin-top: 12px;
+		}
+		.inline-actions .button {
+			flex: 1;
+			padding: 0 10px;
+		}
+		.point-actions {
+			display: grid;
+			grid-template-columns: repeat(4, 1fr);
+			gap: 6px;
+			padding: 0 16px 14px;
+		}
+		.point-actions .button {
+			min-height: 34px;
+			padding: 0 7px;
+			font-size: 10px;
+		}
+		.points-list {
+			min-height: 120px;
+			flex: 1 1 auto;
+			overflow: auto;
+			margin: 0 16px;
+			padding: 5px;
+			border: 1px solid var(--line);
+			border-radius: 16px;
+			background: rgba(242, 242, 240, 0.74);
+		}
+		.point-row {
+			width: 100%;
+			min-height: 42px;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 12px;
+			padding: 7px 9px;
+			border: 1px solid transparent;
+			border-radius: 11px;
+			background: transparent;
+			text-align: left;
+			cursor: pointer;
+			transition: color 160ms ease, border-color 160ms ease, background 160ms ease, transform 160ms ease;
+		}
+		.point-row:hover {
+			background: rgba(255, 255, 255, 0.8);
+		}
+		.point-row[aria-selected="true"] {
+			border-color: rgba(223, 31, 45, 0.22);
+			background: #fff;
+			box-shadow: 0 5px 16px rgba(35, 38, 42, 0.08);
+			color: var(--red-dark);
+			transform: translateX(2px);
+		}
+		.point-name {
+			overflow: hidden;
+			font-size: 12px;
+			font-weight: 700;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		.point-coords {
+			color: var(--quiet);
+			font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+			font-size: 9px;
+			white-space: nowrap;
+		}
+		.properties {
+			flex: 0 0 auto;
+			margin: 14px 16px 16px;
+			padding: 15px;
+			border: 1px solid var(--line);
+			border-radius: 16px;
+			background: rgba(255, 255, 255, 0.64);
+		}
+		.status-strip {
+			position: fixed;
+			left: var(--edge);
+			right: var(--edge);
+			bottom: var(--edge);
+			min-height: 46px;
+			display: flex;
+			align-items: center;
+			gap: 18px;
+			padding: 8px 16px;
+			border-radius: 17px;
+			font-size: 10px;
+		}
+		.metric {
+			display: flex;
+			align-items: baseline;
+			gap: 5px;
+			white-space: nowrap;
+		}
+		.metric strong {
+			font-size: 12px;
+		}
+		.metric span, .coordinate-note {
+			color: var(--muted);
+		}
+		.coordinate-note {
+			white-space: nowrap;
+		}
+		.status-message {
+			min-width: 0;
+			margin-left: auto;
+			overflow: hidden;
+			color: var(--muted);
+			font-weight: 600;
+			text-align: right;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+		.hidden-file, .sr-only {
+			position: absolute;
+			width: 1px;
+			height: 1px;
+			padding: 0;
+			margin: -1px;
+			overflow: hidden;
+			clip: rect(0, 0, 0, 0);
+			white-space: nowrap;
+			border: 0;
+		}
+		::-webkit-scrollbar {
+			width: 9px;
+		}
+		::-webkit-scrollbar-thumb {
+			border: 3px solid transparent;
+			border-radius: 999px;
+			background: rgba(37, 39, 42, 0.2);
+			background-clip: padding-box;
+		}
+		@media (max-width: 1280px) {
+			:root {
+				--left-width: 280px;
+				--right-width: 370px;
+			}
+			.topbar {
+				gap: 10px;
+			}
+			.brand {
+				min-width: 220px;
+			}
+			.health {
+				display: none;
+			}
+			.header-actions .button {
+				padding: 0 11px;
+			}
+			.status-strip {
+				gap: 11px;
+			}
+		}
+		@media (max-height: 760px) {
+			.card-header {
+				padding-top: 16px;
+			}
+			.properties {
+				padding: 12px;
+				margin-top: 10px;
+			}
+			.point-row {
+				min-height: 36px;
+			}
+		}
+		@media (prefers-reduced-motion: reduce) {
+			*, *::before, *::after {
+				scroll-behavior: auto !important;
+				transition-duration: 0.001ms !important;
+			}
 		}
 	</style>
 </head>
 <body>
 	<canvas id="view"></canvas>
-	<section class="panel">
-		<h1>CS2FOW LOS Point Editor</h1>
-		<div id="self-check" class="status">self-check: running...</div>
 
-		<fieldset>
-			<legend>Model</legend>
-			<div class="actions compact">
-				<button id="load-sas">Load SAS GLB</button>
-				<button id="reset-camera">Reset Camera</button>
+	<header class="topbar floating">
+		<div class="brand" aria-label="CS2FOW Visibility Studio">
+			<span class="brand-mark" aria-hidden="true"></span>
+			<div>
+				<div class="brand-name">CS2FOW Visibility Studio</div>
+				<div class="brand-subtitle">LOS Point Editor</div>
 			</div>
-			<input id="sas-file" class="hidden-file" type="file" accept=".glb,.gltf">
-			<label>Model opacity <input id="model-opacity" type="range" min="0.1" max="1" step="0.05" value="0.78"></label>
-			<label>Point opacity <input id="point-opacity" type="range" min="0.25" max="1" step="0.05" value="1"></label>
-		</fieldset>
+		</div>
+		<div class="health">
+			<div id="model-status" class="pill" aria-live="polite">Model: checking</div>
+			<div id="self-check" class="pill" role="status" aria-live="polite">Self-check: running</div>
+		</div>
+		<div class="header-actions">
+			<button id="reset-camera" class="button" type="button">Reset Camera</button>
+			<button id="load-sas" class="button" type="button">Load Model</button>
+			<button id="import-los" class="button" type="button">Import LOS</button>
+			<div id="export-wrap" class="export-wrap">
+				<button id="export-toggle" class="button primary" type="button" aria-haspopup="menu" aria-expanded="false">Export</button>
+				<div id="export-menu" class="export-menu" role="menu" aria-label="Export LOS points" hidden>
+					<button id="copy-json" type="button" role="menuitem">Copy JSON</button>
+					<button id="download-json" type="button" role="menuitem">Download JSON</button>
+				</div>
+			</div>
+		</div>
+		<input id="sas-file" class="hidden-file" type="file" accept=".glb,.gltf">
+		<input id="import-json" class="hidden-file" type="file" accept=".json,application/json">
+	</header>
 
-		<fieldset>
-			<legend>Weapon Preview</legend>
-			<label>Weapon
-				<select id="weapon-select">
-					<option value="">none</option>
-					<option value="usp_silencer">USP-S</option>
-					<option value="m4a1_silencer">M4A1-S</option>
-					<option value="awp">AWP</option>
-				</select>
-			</label>
-			<button id="reset-weapon">Reset Grip</button>
-			<div class="row">
-				<label>X<input id="weapon-x" type="number" value="0" step="0.25"></label>
-				<label>Y<input id="weapon-y" type="number" value="0" step="0.25"></label>
-				<label>Z<input id="weapon-z" type="number" value="0" step="0.25"></label>
+	<aside id="scene-card" class="card scene-card floating" aria-labelledby="scene-title">
+		<div class="card-header">
+			<div>
+				<p class="eyebrow">Scene</p>
+				<h1 id="scene-title">Build the view</h1>
 			</div>
-			<div class="row">
-				<label>Pitch<input id="weapon-rx" type="number" value="0" step="1"></label>
-				<label>Yaw<input id="weapon-ry" type="number" value="0" step="1"></label>
-				<label>Roll<input id="weapon-rz" type="number" value="0" step="1"></label>
-			</div>
-			<label>Scale <input id="weapon-scale" type="range" min="0.25" max="2" step="0.01" value="1"></label>
-		</fieldset>
+		</div>
+		<nav class="segmented" aria-label="Scene controls">
+			<button type="button" data-scene-tab="model" aria-pressed="true">Model</button>
+			<button type="button" data-scene-tab="weapon" aria-pressed="false">Weapon</button>
+			<button type="button" data-scene-tab="bounds" aria-pressed="false">Bounds</button>
+		</nav>
+		<div class="scene-content">
+			<section class="scene-panel" data-scene-panel="model">
+				<div class="section-block">
+					<h3>Visibility</h3>
+					<label class="field"><span>Model opacity <output id="model-opacity-value">80%</output></span><input id="model-opacity" type="range" min="0.1" max="1" step="0.05" value="0.8"></label>
+					<label class="field"><span>Point opacity <output id="point-opacity-value">100%</output></span><input id="point-opacity" type="range" min="0.25" max="1" step="0.05" value="1"></label>
+				</div>
+				<div class="section-block">
+					<h3>Local model</h3>
+					<p class="hint">The studio loads ignored local SAS assets when available. You can also choose a GLB or GLTF from this machine.</p>
+					<button class="button" type="button" data-load-model>Choose Model</button>
+				</div>
+			</section>
 
-		<fieldset>
-			<legend>Collision Bounds</legend>
-			<div class="hint">AABB fallback dots are generated from these bounds and are not exported.</div>
-			<div class="row">
-				<label>Min X<input id="min-x" type="number" value="-16" step="1"></label>
-				<label>Min Y<input id="min-y" type="number" value="-16" step="1"></label>
-				<label>Min Z<input id="min-z" type="number" value="0" step="1"></label>
-			</div>
-			<div class="row">
-				<label>Max X<input id="max-x" type="number" value="16" step="1"></label>
-				<label>Max Y<input id="max-y" type="number" value="16" step="1"></label>
-				<label>Max Z<input id="max-z" type="number" value="72" step="1"></label>
-			</div>
-		</fieldset>
+			<section class="scene-panel" data-scene-panel="weapon" hidden>
+				<div class="section-block">
+					<label class="field"><span>Weapon preview</span>
+						<select id="weapon-select">
+							<option value="">None</option>
+							<option value="usp_silencer">USP-S</option>
+							<option value="m4a1_silencer">M4A1-S</option>
+							<option value="awp">AWP</option>
+						</select>
+					</label>
+					<div class="inline-actions"><button id="reset-weapon" class="button" type="button">Reset Grip</button></div>
+				</div>
+				<div class="section-block">
+					<h3>Position</h3>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="weapon-x" type="number" value="0" step="0.25"></label>
+						<label class="field"><span>Y</span><input id="weapon-y" type="number" value="0" step="0.25"></label>
+						<label class="field"><span>Z</span><input id="weapon-z" type="number" value="0" step="0.25"></label>
+					</div>
+					<h3>Rotation</h3>
+					<div class="grid-3">
+						<label class="field"><span>Pitch</span><input id="weapon-rx" type="number" value="0" step="1"></label>
+						<label class="field"><span>Yaw</span><input id="weapon-ry" type="number" value="0" step="1"></label>
+						<label class="field"><span>Roll</span><input id="weapon-rz" type="number" value="0" step="1"></label>
+					</div>
+					<label class="field"><span>Scale <output id="weapon-scale-value">1.00×</output></span><input id="weapon-scale" type="range" min="0.25" max="2" step="0.01" value="1"></label>
+				</div>
+			</section>
 
-		<fieldset>
-			<legend>LOS Points</legend>
-			<div class="actions">
-				<button id="add-point">Add</button>
-				<button id="duplicate-point">Duplicate</button>
-				<button id="delete-point">Delete</button>
-				<button id="reset-points">Reset</button>
-				<button id="import-los">Import LOS</button>
-				<button id="copy-json">Copy JSON</button>
-				<button id="download-json">Download JSON</button>
-			</div>
-			<input id="import-json" class="hidden-file" type="file" accept=".json,application/json">
-			<table>
-				<thead>
-					<tr><th>Name</th><th>X</th><th>Y</th><th>Z</th></tr>
-				</thead>
-				<tbody id="points-table"></tbody>
-			</table>
-		</fieldset>
+			<section class="scene-panel" data-scene-panel="bounds" hidden>
+				<div class="section-block">
+					<h3>Collision bounds</h3>
+					<p class="hint">Eight AABB fallback points are generated from these bounds. They are visual context and are not exported.</p>
+					<h3>Minimum</h3>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="min-x" type="number" value="-16" step="1"></label>
+						<label class="field"><span>Y</span><input id="min-y" type="number" value="-16" step="1"></label>
+						<label class="field"><span>Z</span><input id="min-z" type="number" value="0" step="1"></label>
+					</div>
+					<h3>Maximum</h3>
+					<div class="grid-3">
+						<label class="field"><span>X</span><input id="max-x" type="number" value="16" step="1"></label>
+						<label class="field"><span>Y</span><input id="max-y" type="number" value="16" step="1"></label>
+						<label class="field"><span>Z</span><input id="max-z" type="number" value="72" step="1"></label>
+					</div>
+				</div>
+			</section>
+		</div>
+	</aside>
 
-		<fieldset>
-			<legend>Status</legend>
-			<div id="status" class="status"></div>
-		</fieldset>
-	</section>
-	<script type="module" src="./viewer.js"></script>
+	<aside id="points-card" class="card points-card floating" aria-labelledby="points-title">
+		<div class="card-header">
+			<div>
+				<p class="eyebrow">Target samples</p>
+				<h2 id="points-title">LOS points</h2>
+			</div>
+			<span id="point-count" class="count-badge">0 points</span>
+		</div>
+		<div class="point-actions">
+			<button id="add-point" class="button" type="button">Add</button>
+			<button id="duplicate-point" class="button" type="button">Duplicate</button>
+			<button id="delete-point" class="button danger" type="button">Delete</button>
+			<button id="reset-points" class="button" type="button">Reset</button>
+		</div>
+		<div id="points-list" class="points-list" role="listbox" aria-label="Editable LOS points"></div>
+		<section class="properties" aria-labelledby="selected-point-title">
+			<h3 id="selected-point-title">Selected point</h3>
+			<label class="field"><span>Name</span><input id="point-name" type="text" autocomplete="off"></label>
+			<div class="grid-3">
+				<label class="field"><span>X</span><input id="point-x" type="number" step="0.25"></label>
+				<label class="field"><span>Y</span><input id="point-y" type="number" step="0.25"></label>
+				<label class="field"><span>Z</span><input id="point-z" type="number" step="0.25"></label>
+			</div>
+		</section>
+	</aside>
+
+	<footer class="status-strip floating" aria-label="Editor status">
+		<div class="metric"><strong id="status-body-count">0</strong><span>body points</span></div>
+		<div class="metric"><strong id="status-aabb-count">8</strong><span>AABB points</span></div>
+		<div class="metric"><strong id="status-muzzle">None</strong><span>muzzle</span></div>
+		<div class="metric"><strong id="status-selected">None</strong><span>selected</span></div>
+		<div class="coordinate-note">Source units · X forward/back · Y left/right · Z up</div>
+		<div id="status" class="status-message" role="status" aria-live="polite">Preparing studio…</div>
+	</footer>
+
+	<script type="module" src="./viewer.js?studio=3"></script>
 </body>
 </html>

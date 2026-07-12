@@ -1,6 +1,6 @@
-# CS2FOW line-of-sight point editor
+# CS2FOW Visibility Studio
 
-Local-only editor for tuning CS2FOW target line-of-sight (LOS) points against the exported CS2 SAS model.
+Local-only LOS Point Editor for tuning CS2FOW target samples against the exported CS2 SAS model. It opens directly as a fixed desktop workspace: scene controls are on the left, editable points are on the right, and file actions are in the top bar.
 
 The editor shows:
 
@@ -24,7 +24,7 @@ This writes ignored files under:
 tools/visibility_point_editor/local_assets/
 ```
 
-The weapon preview and muzzle point are only for tuning and visual context. Use the Weapon Preview panel to choose a weapon and adjust its local position, rotation, and scale.
+The weapon preview and muzzle point are only for tuning and visual context. Use the Weapon tab to choose a weapon and adjust its local position, rotation, and scale. Use the Export menu to copy or download the unchanged LOS JSON format.
 
 ## Run
 

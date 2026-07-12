@@ -9,10 +9,10 @@ import {GLTFLoader} from "https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTF
 
 const k_source_units_per_meter = 39.3700787;
 const k_default_preset = "default_sas_visibility_points.json";
-const k_aabb_color = 0x66e3ff;
-const k_body_color = 0xffd166;
-const k_selected_color = 0xff7a45;
-const k_muzzle_color = 0xff4fd8;
+const k_aabb_color = 0x007c91;
+const k_body_color = 0xa96300;
+const k_selected_color = 0xdf1f2d;
+const k_muzzle_color = 0x92278f;
 const k_aabb_dot_radius = 0.022 / 3.0;
 const k_body_dot_radius = 0.03 / 3.0;
 const k_selected_dot_radius = 0.044 / 3.0;
@@ -38,6 +38,17 @@ const read_number = (id) =>
 	return Number.isFinite(value) ? value : 0;
 };
 const clone_point = (point) => ({name: point.name, x: Number(point.x), y: Number(point.y), z: Number(point.z)});
+
+function unique_point_name(base)
+{
+	let name = base;
+	let suffix = 2;
+	while (points.some((point) => point.name === name))
+	{
+		name = `${base}_${suffix++}`;
+	}
+	return name;
+}
 
 function validated_points(value, label)
 {
@@ -81,6 +92,7 @@ let aabb_group;
 let muzzle_group;
 let status_extra = "";
 let active_weapon_key = "";
+let model_status = "Model unavailable";
 
 function reset_camera()
 {
@@ -247,64 +259,77 @@ function draw_points()
 	draw_muzzle_point();
 }
 
-function render_table()
+function render_point_list()
 {
-	const body = $("points-table");
-	body.innerHTML = "";
+	const list = $("points-list");
+	list.innerHTML = "";
 	for (let index = 0; index < points.length; ++index)
 	{
 		const point = points[index];
-		const row = document.createElement("tr");
-		row.className = index === selected_index ? "selected" : "";
+		const row = document.createElement("button");
+		row.type = "button";
+		row.className = "point-row";
+		row.setAttribute("role", "option");
+		row.setAttribute("aria-selected", String(index === selected_index));
 		row.addEventListener("click", () => select_point(index));
 
-		for (const key of ["name", "x", "y", "z"])
-		{
-			const cell = document.createElement("td");
-			const input = document.createElement("input");
-			input.value = key === "name" ? point.name : format_number(point[key]);
-			if (key !== "name")
-			{
-				input.type = "number";
-				input.step = "0.25";
-			}
-			input.addEventListener("input", () =>
-			{
-				point[key] = key === "name" ? input.value : Number(input.value);
-				draw_points();
-				update_status();
-			});
-			cell.appendChild(input);
-			row.appendChild(cell);
-		}
-		body.appendChild(row);
+		const name = document.createElement("span");
+		name.className = "point-name";
+		name.textContent = point.name;
+		const coordinates = document.createElement("span");
+		coordinates.className = "point-coords";
+		coordinates.textContent = `${format_number(point.x)}, ${format_number(point.y)}, ${format_number(point.z)}`;
+		row.append(name, coordinates);
+		list.appendChild(row);
 	}
+}
+
+function render_selected_point()
+{
+	const point = points[selected_index];
+	for (const id of ["point-name", "point-x", "point-y", "point-z"])
+	{
+		$(id).disabled = !point;
+	}
+	$("add-point").disabled = points.length >= 32;
+	$("duplicate-point").disabled = !point || points.length >= 32;
+	$("delete-point").disabled = !point;
+	$("point-count").textContent = `${points.length} point${points.length === 1 ? "" : "s"}`;
+	$("point-name").value = point?.name ?? "";
+	$("point-x").value = point ? format_number(point.x) : "";
+	$("point-y").value = point ? format_number(point.y) : "";
+	$("point-z").value = point ? format_number(point.z) : "";
+}
+
+function render_point_editor()
+{
+	render_point_list();
+	render_selected_point();
 }
 
 function update_status()
 {
-	$("status").textContent = [
-		`editable body points=${points.length}`,
-		`generated AABB fallback points=${generated_aabb_points().length}`,
-		`dynamic muzzle point=${weapon_model ? active_weapon_key : "none"}`,
-		`selected=${points[selected_index]?.name ?? "none"}`,
-		"coordinates: Source local units, X forward/back, Y left/right, Z up",
-		status_extra
-	].filter(Boolean).join("\n");
+	$("status-body-count").textContent = points.length;
+	$("status-aabb-count").textContent = generated_aabb_points().length;
+	$("status-muzzle").textContent = weapon_model ? active_weapon_key : "None";
+	$("status-selected").textContent = points[selected_index]?.name ?? "None";
+	$("status").textContent = status_extra || (model ? "Studio ready." : "Load a local SAS model to begin.");
+	$("model-status").textContent = model_status;
+	$("model-status").classList.toggle("ready", Boolean(model));
 }
 
 function update_scene()
 {
-	selected_index = Math.min(Math.max(selected_index, 0), Math.max(points.length - 1, 0));
+	selected_index = points.length ? Math.min(Math.max(selected_index, 0), points.length - 1) : -1;
 	set_model_opacity();
 	draw_points();
-	render_table();
+	render_point_editor();
 	update_status();
 }
 
 function select_point(index)
 {
-	selected_index = Math.min(Math.max(index, 0), points.length - 1);
+	selected_index = points.length ? Math.min(Math.max(index, 0), points.length - 1) : -1;
 	update_scene();
 }
 
@@ -348,7 +373,7 @@ function apply_readable_materials()
 			return;
 		}
 		node.material = new THREE.MeshStandardMaterial({
-			color: 0x8e969a,
+			color: 0x646a70,
 			roughness: 0.82,
 			metalness: 0.0
 		});
@@ -406,6 +431,7 @@ function apply_weapon_grip(key)
 	$("weapon-rz").value = grip.rz;
 	$("weapon-scale").value = grip.scale;
 	update_weapon_transform();
+	update_range_labels();
 }
 
 async function load_weapon(key)
@@ -414,6 +440,7 @@ async function load_weapon(key)
 	active_weapon_key = key;
 	if (!key)
 	{
+		status_extra = model ? "Weapon preview cleared." : "No local SAS model loaded.";
 		draw_muzzle_point();
 		update_status();
 		return;
@@ -470,6 +497,7 @@ async function load_model_from_url(url)
 			scene.add(model);
 			const posed = apply_tools_preview(gltf);
 			set_model_opacity();
+			model_status = "Model loaded";
 			status_extra = `SAS loaded: ${url}${posed ? " (tools_preview pose)" : ""}`;
 			update_scene();
 			resolve();
@@ -490,6 +518,7 @@ async function load_manifest()
 		manifest_models = manifest.models || {};
 		if (manifest.models?.ct_sas)
 		{
+			model_status = "Model loading";
 			status_extra = "Loading local SAS GLB...";
 			update_status();
 			await load_model_from_url(manifest.models.ct_sas);
@@ -499,21 +528,60 @@ async function load_manifest()
 	}
 	catch (error)
 	{
+		model_status = "Model unavailable";
 		status_extra = `No local SAS model loaded yet. ${error.message || error}`;
 		update_status();
 	}
 }
 
+function set_export_menu(open)
+{
+	$("export-menu").hidden = !open;
+	$("export-toggle").setAttribute("aria-expanded", String(open));
+	if (open)
+	{
+		$("copy-json").focus();
+	}
+}
+
+function update_range_labels()
+{
+	$("model-opacity-value").textContent = `${Math.round(read_number("model-opacity") * 100)}%`;
+	$("point-opacity-value").textContent = `${Math.round(read_number("point-opacity") * 100)}%`;
+	$("weapon-scale-value").textContent = `${read_number("weapon-scale").toFixed(2)}x`;
+}
+
 function install_ui()
 {
-	$("load-sas").addEventListener("click", () => $("sas-file").click());
+	for (const button of document.querySelectorAll("#load-sas, [data-load-model]"))
+	{
+		button.addEventListener("click", () => $("sas-file").click());
+	}
 	$("import-los").addEventListener("click", () => $("import-json").click());
 	$("reset-camera").addEventListener("click", reset_camera);
+	for (const tab of document.querySelectorAll("[data-scene-tab]"))
+	{
+		tab.addEventListener("click", () =>
+		{
+			for (const button of document.querySelectorAll("[data-scene-tab]"))
+			{
+				button.setAttribute("aria-pressed", String(button === tab));
+			}
+			for (const panel of document.querySelectorAll("[data-scene-panel]"))
+			{
+				panel.hidden = panel.dataset.scenePanel !== tab.dataset.sceneTab;
+			}
+		});
+	}
 	$("reset-weapon").addEventListener("click", () => apply_weapon_grip($("weapon-select").value));
 	$("weapon-select").addEventListener("change", (event) => load_weapon(event.target.value));
 	for (const id of ["weapon-x", "weapon-y", "weapon-z", "weapon-rx", "weapon-ry", "weapon-rz", "weapon-scale"])
 	{
-		$(id).addEventListener("input", update_weapon_transform);
+		$(id).addEventListener("input", () =>
+		{
+			update_weapon_transform();
+			update_range_labels();
+		});
 	}
 	$("sas-file").addEventListener("change", (event) =>
 	{
@@ -525,21 +593,57 @@ function install_ui()
 	});
 	for (const id of ["model-opacity", "point-opacity", "min-x", "min-y", "min-z", "max-x", "max-y", "max-z"])
 	{
-		$(id).addEventListener("input", update_scene);
+		$(id).addEventListener("input", () =>
+		{
+			update_range_labels();
+			update_scene();
+		});
+	}
+	$("point-name").addEventListener("input", (event) =>
+	{
+		if (points[selected_index])
+		{
+			points[selected_index].name = event.target.value;
+			render_point_list();
+			update_status();
+		}
+	});
+	for (const key of ["x", "y", "z"])
+	{
+		$(`point-${key}`).addEventListener("input", (event) =>
+		{
+			const value = Number(event.target.value);
+			if (points[selected_index] && Number.isFinite(value))
+			{
+				points[selected_index][key] = value;
+				draw_points();
+				render_point_list();
+				update_status();
+			}
+		});
 	}
 	$("add-point").addEventListener("click", () =>
 	{
-		points.push({name: `custom_${points.length + 1}`, x: 0, y: 0, z: 36});
+		if (points.length >= 32)
+		{
+			return;
+		}
+		let number = points.length + 1;
+		while (points.some((point) => point.name === `custom_${number}`))
+		{
+			++number;
+		}
+		points.push({name: `custom_${number}`, x: 0, y: 0, z: 36});
 		select_point(points.length - 1);
 	});
 	$("duplicate-point").addEventListener("click", () =>
 	{
-		if (!points.length)
+		if (!points.length || points.length >= 32)
 		{
 			return;
 		}
 		const copy = clone_point(points[selected_index]);
-		copy.name = `${copy.name}_copy`;
+		copy.name = unique_point_name(`${copy.name}_copy`);
 		points.splice(selected_index + 1, 0, copy);
 		select_point(selected_index + 1);
 	});
@@ -553,6 +657,31 @@ function install_ui()
 		select_point(Math.min(selected_index, points.length - 1));
 	});
 	$("reset-points").addEventListener("click", () => set_points(default_points));
+	$("export-toggle").addEventListener("click", () => set_export_menu($("export-menu").hidden));
+	$("export-menu").addEventListener("keydown", (event) =>
+	{
+		const items = [$("copy-json"), $("download-json")];
+		const index = items.indexOf(document.activeElement);
+		if (event.key === "Escape")
+		{
+			event.preventDefault();
+			set_export_menu(false);
+			$("export-toggle").focus();
+		}
+		else if (event.key === "ArrowDown" || event.key === "ArrowUp")
+		{
+			event.preventDefault();
+			const direction = event.key === "ArrowDown" ? 1 : -1;
+			items[(index + direction + items.length) % items.length].focus();
+		}
+	});
+	document.addEventListener("pointerdown", (event) =>
+	{
+		if (!$("export-wrap").contains(event.target))
+		{
+			set_export_menu(false);
+		}
+	});
 	$("copy-json").addEventListener("click", async () =>
 	{
 		try
@@ -564,6 +693,7 @@ function install_ui()
 		{
 			status_extra = `Copy failed: ${error.message || error}`;
 		}
+		set_export_menu(false);
 		update_status();
 	});
 	$("download-json").addEventListener("click", () =>
@@ -575,6 +705,7 @@ function install_ui()
 		anchor.download = "los_points_sas.json";
 		anchor.click();
 		URL.revokeObjectURL(url);
+		set_export_menu(false);
 	});
 	$("import-json").addEventListener("change", async (event) =>
 	{
@@ -595,6 +726,7 @@ function install_ui()
 		}
 		update_status();
 	});
+	update_range_labels();
 }
 
 function install_picking()
@@ -630,18 +762,26 @@ function run_self_checks()
 	const roundtrip = JSON.parse(export_json());
 	expect(roundtrip.points.length === points.length, "JSON round trip count");
 	expect(roundtrip.point_count === points.length, "JSON point count metadata");
+	expect(roundtrip.version === 1 && roundtrip.model === "ctm_sas", "JSON metadata");
 	expect(roundtrip.coordinate_space === "source_local", "JSON coordinate space");
+	expect(roundtrip.points.every((point, index) => point.name === points[index].name), "JSON point order");
+	expect($("points-list").querySelectorAll('[role="option"]').length === 15, "point list count");
+	expect($("point-name").value === points[selected_index]?.name, "selected point synchronization");
+	for (const id of ["load-sas", "import-los", "export-toggle", "points-list", "point-name", "scene-card", "points-card"])
+	{
+		expect(Boolean($(id)), `redesigned control: ${id}`);
+	}
 
 	const element = $("self-check");
 	if (failures.length === 0)
 	{
-		element.textContent = "self-check: passed";
-		element.className = "status ok";
+		element.textContent = "Self-check passed";
+		element.className = "pill ok";
 	}
 	else
 	{
-		element.textContent = `self-check: failed\n${failures.join("\n")}`;
-		element.className = "status bad";
+		element.textContent = `Self-check failed: ${failures.join(", ")}`;
+		element.className = "pill bad";
 	}
 }
 
@@ -652,7 +792,7 @@ function init_scene()
 	renderer.setSize(window.innerWidth, window.innerHeight);
 
 	scene = new THREE.Scene();
-	scene.background = new THREE.Color(0x0b0e12);
+	scene.background = new THREE.Color(0xeff1f1);
 	camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.02, 3000);
 	camera.position.set(4.2, 3.0, 6.2);
 
@@ -674,7 +814,7 @@ function init_scene()
 		points[selected_index].x = value.x;
 		points[selected_index].y = value.y;
 		points[selected_index].z = value.z;
-		render_table();
+		render_point_editor();
 		update_status();
 	});
 	scene.add(transform);
@@ -684,8 +824,8 @@ function init_scene()
 	aabb_group = new THREE.Group();
 	muzzle_group = new THREE.Group();
 	scene.add(aabb_group, marker_group, muzzle_group);
-	scene.add(new THREE.HemisphereLight(0xffffff, 0x273142, 2.5));
-	scene.add(new THREE.GridHelper(4, 8, 0x3b4757, 0x202936));
+	scene.add(new THREE.HemisphereLight(0xffffff, 0xc7cbd0, 3.0));
+	scene.add(new THREE.GridHelper(4, 8, 0x9ca2a7, 0xd5d8da));
 
 	window.addEventListener("resize", () =>
 	{
@@ -714,6 +854,6 @@ async function main()
 
 main().catch((error) =>
 {
-	$("self-check").textContent = `self-check: failed\n${error.stack || error}`;
-	$("self-check").className = "status bad";
+	$("self-check").textContent = `Self-check failed: ${error.message || error}`;
+	$("self-check").className = "pill bad";
 });
