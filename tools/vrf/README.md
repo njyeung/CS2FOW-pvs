@@ -1,6 +1,8 @@
 # ValveResourceFormat CLI
 
-CS2FOW packages Source2Viewer-CLI 19.2 from ValveResourceFormat release assets.
+CS2FOW packages Source2Viewer-CLI release 19.2 (build 19.2.6339) from the official ValveResourceFormat
+release assets. Their SHA-256 values, exact packaged files, dependency graph,
+and licenses are recorded in `third_party/vrf_licenses/DEPENDENCIES.txt`.
 
 The binaries are not committed to git. For local packaging, place the extracted
 CLI files here:
