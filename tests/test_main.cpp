@@ -12,13 +12,34 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+#include <Windows.h>
+#else
+#include <unistd.h>
+#endif
+
 using namespace cs2fow;
+
+namespace
+{
+
+uint64_t process_id()
+{
+#if defined(_WIN32)
+	return GetCurrentProcessId();
+#else
+	return static_cast<uint64_t>(getpid());
+#endif
+}
+
+} // namespace
 
 int main(int argc, char **argv)
 {
@@ -35,9 +56,23 @@ int main(int argc, char **argv)
 	}
 	if (argc == 2 && std::strcmp(argv[1], "--process-sleep") == 0)
 	{
-		std::cout << "sleep probe\n" << std::flush;
+		std::cout << "sleep probe child-pid=" << process_id() << '\n' << std::flush;
 		std::this_thread::sleep_for(std::chrono::seconds(10));
 		return 0;
+	}
+	if (argc == 3 && std::strcmp(argv[1], "--process-sleep-file") == 0)
+	{
+		std::ofstream(argv[2]) << process_id();
+		std::this_thread::sleep_for(std::chrono::seconds(10));
+		return 0;
+	}
+	if (argc == 3 && std::strcmp(argv[1], "--process-nested") == 0)
+	{
+		std::cout << "parent-pid=" << process_id() << '\n' << std::flush;
+		process_result result;
+		std::string error;
+		return run_process(std::filesystem::absolute(argv[0]), {"--process-sleep-file", argv[2]}, std::chrono::seconds(10),
+			nullptr, false, posix_process_group::inherited, result, error) ? result.exit_code : 1;
 	}
 	assert(cpu_supports_avx());
 	const std::filesystem::path directory = std::filesystem::temp_directory_path()

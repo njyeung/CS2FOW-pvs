@@ -85,7 +85,8 @@ void automatic_baker::run(bake_request request)
 		"--vrf", request.vrf.string(),
 		"--low-priority"
 	};
-	if (!run_process(request.baker, arguments, k_auto_bake_timeout, &cancel_, true, process, completion.error))
+	if (!run_process(request.baker, arguments, k_auto_bake_timeout, &cancel_, true,
+		posix_process_group::isolated, process, completion.error))
 	{
 		finish(std::move(completion));
 		return;

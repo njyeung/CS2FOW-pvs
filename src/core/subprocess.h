@@ -24,9 +24,15 @@ struct process_result
 	std::string output_tail;
 };
 
+enum class posix_process_group
+{
+	isolated,
+	inherited
+};
+
 bool run_process(const std::filesystem::path &executable, const std::vector<std::string> &arguments,
 	std::chrono::milliseconds timeout, const std::atomic_bool *cancel, bool low_priority,
-	process_result &result, std::string &error);
+	posix_process_group process_group, process_result &result, std::string &error);
 bool lower_process_priority(std::string &error);
 
 } // namespace cs2fow
