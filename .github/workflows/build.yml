@@ -45,6 +45,7 @@ jobs:
           $zip = "$env:RUNNER_TEMP\vrf.zip"
           $tmp = "$env:RUNNER_TEMP\vrf"
           Invoke-WebRequest "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${{ env.VRF_VERSION }}/cli-windows-x64.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne "53e7e8dac1ddd876078346de709c8dbe613a967e94cd0c969aa34c61ec07680d") { throw "VRF archive checksum mismatch" }
           Expand-Archive $zip -DestinationPath $tmp
           $cli = Get-ChildItem $tmp -Recurse -Filter Source2Viewer-CLI.exe | Select-Object -First 1
           if ($null -eq $cli) { throw "Source2Viewer-CLI.exe not found" }
@@ -67,6 +68,7 @@ jobs:
       - name: Check visibility point editor
         run: |
           python tools/visibility_point_editor/check_points.py
+          python -m unittest -v tests/test_package.py
           node --check tools/visibility_point_editor/viewer.js
 
       - name: Package
@@ -108,6 +110,7 @@ jobs:
         run: |
           tmp="$(mktemp -d)"
           curl -L "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${VRF_VERSION}/cli-linux-x64.zip" -o "$tmp/vrf.zip"
+          echo "30d86dfd72bf35c8a38015c81bd92f0b04b1f49304e73a5d734c875803b2685b  $tmp/vrf.zip" | sha256sum -c -
           unzip -q "$tmp/vrf.zip" -d "$tmp/vrf"
           cli="$(find "$tmp/vrf" -type f -name Source2Viewer-CLI | head -n 1)"
           test -n "$cli"
@@ -126,7 +129,9 @@ jobs:
           python3 -c "from ambuild2.run import cli_run; cli_run()"
 
       - name: Test
-        run: ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
+        run: |
+          ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
+          python3 -m unittest -v tests/test_package.py
 
       - name: Check SteamRT3 ABI
         run: |

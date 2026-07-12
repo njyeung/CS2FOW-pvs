@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import shutil
+import subprocess
 import sys
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -18,17 +21,33 @@ ROOT = Path(__file__).resolve().parent
 PACKAGES = ROOT / "packages"
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 RELEASE_MANIFEST = ROOT / "release" / f"v{VERSION}-manifest.json"
+ARCHIVE_NAMES = {
+  "windows-x86_64": f"cs2fow-{VERSION}-windows-x86_64.zip",
+  "linux-x86_64": f"cs2fow-{VERSION}-linux-x86_64.zip",
+  "official-maps": f"cs2fow-{VERSION}-official-maps.zip",
+}
+VRF_LICENSE_NAMES = (
+  "Blake3.LICENSE", "ConsoleAppFramework.LICENSE", "DEPENDENCIES.txt",
+  "dotnet-10.0.8.LICENSE", "dotnet-10.0.8.THIRD-PARTY-NOTICES",
+  "K4os.Compression.LZ4.LICENSE", "KeyValues2.COPYING", "Roboto.NOTICE",
+  "SharpGLTF.LICENSE", "SkiaSharp.LICENSE", "SkiaSharp.THIRD-PARTY-NOTICES",
+  "SPIRV-Cross.LICENSE", "TinyBCSharp.LICENSE", "TinyEXR.LICENSE",
+  "TinyEXR.NET.LICENSE", "TinyEXR.NOTICE", "ValveKeyValue.LICENSE",
+  "ValvePak.LICENSE", "ValveResourceFormat.LICENSE", "Vortice.LICENSE",
+  "zlib.LICENSE", "zstd.LICENSE", "ZstdSharp.LICENSE",
+)
+LICENSE_FILES = {ROOT / "third_party" / "cgltf.LICENSE": "cgltf.LICENSE"} | {
+  ROOT / "third_party" / "vrf_licenses" / name: name for name in VRF_LICENSE_NAMES
+}
+VRF_FILES = {
+  "win64": {"Source2Viewer-CLI.exe", "TinyEXRNative.dll", "blake3_dotnet.dll", "libSkiaSharp.dll", "spirv-cross.dll"},
+  "linux64": {"Source2Viewer-CLI", "libblake3_dotnet.so", "libSkiaSharp.so", "libspirv-cross.so"},
+}
 
 
 def copy_file(source: Path, target: Path) -> None:
   target.parent.mkdir(parents=True, exist_ok=True)
   shutil.copy2(source, target)
-
-
-def copy_tree(source: Path, target: Path) -> None:
-  if target.exists():
-    shutil.rmtree(target)
-  shutil.copytree(source, target)
 
 
 def write_text(path: Path, text: str) -> None:
@@ -94,15 +113,20 @@ def copy_common_files(out: Path) -> None:
   copy_file(ROOT / "README.md", out / "README.md")
   copy_file(ROOT / "cfg" / "cs2fow.cfg", out / "cfg" / "cs2fow.cfg")
   copy_file(ROOT / "gamedata" / "cs2fow.games.txt", out / "addons" / "cs2fow" / "gamedata" / "cs2fow.games.txt")
+  for source, name in LICENSE_FILES.items():
+    copy_file(source, out / "licenses" / name)
   write_text(out / "addons" / "cs2fow" / "data" / "maps" / ".gitkeep", "")
 
 
 def build_core_package(platform: str, plugin_name: str, baker_name: str, vrf_dir: str) -> Path:
   out = package_root(f"cs2fow-{VERSION}-{platform}")
   copy_common_files(out)
-  copy_tree(ROOT / "tools" / "vrf" / vrf_dir, out / "tools" / "vrf" / vrf_dir)
-  if vrf_dir == "linux64":
-    (out / "tools" / "vrf" / "linux64" / "libTinyEXRNative.so").unlink(missing_ok=True)
+  vrf_source = ROOT / "tools" / "vrf" / vrf_dir
+  actual_vrf = {path.name for path in vrf_source.iterdir() if path.is_file()}
+  if actual_vrf != VRF_FILES[vrf_dir]:
+    raise RuntimeError(f"unexpected VRF files for {vrf_dir}: {', '.join(sorted(actual_vrf ^ VRF_FILES[vrf_dir]))}")
+  for name in VRF_FILES[vrf_dir]:
+    copy_file(vrf_source / name, out / "tools" / "vrf" / vrf_dir / name)
   copy_file(ROOT / plugin_name, out / "addons" / "cs2fow" / "bin" / Path(plugin_name).name)
   copy_file(ROOT / baker_name, out / "tools" / Path(baker_name).name)
   write_text(
@@ -125,9 +149,74 @@ def build_core_package(platform: str, plugin_name: str, baker_name: str, vrf_dir
     "addons/metamod/cs2fow.vdf",
     "cfg/cs2fow.cfg",
     "tools/" + Path(baker_name).name,
+  } | {f"licenses/{name}" for name in LICENSE_FILES.values()} | {
+    f"tools/vrf/{vrf_dir}/{name}" for name in VRF_FILES[vrf_dir]
   }
   verify_zip(archive, required, set(modes))
   return archive
+
+
+def find_baker() -> Path:
+  candidates = [
+    ROOT / "build" / "cs2fow_baker" / "windows-x86_64" / "cs2fow_baker.exe",
+    ROOT / "build-linux" / "cs2fow_baker" / "linux-x86_64" / "cs2fow_baker",
+  ]
+  if os.name != "nt":
+    candidates.reverse()
+  for candidate in candidates:
+    if candidate.is_file():
+      return candidate
+  raise RuntimeError("built cs2fow_baker is required to validate official maps")
+
+
+def inspect_bvh8(path: Path) -> dict[str, object]:
+  try:
+    result = subprocess.run(
+      [str(find_baker()), "--inspect-bvh8", str(path)],
+      capture_output=True,
+      text=True,
+      timeout=60,
+      check=False,
+    )
+  except (OSError, subprocess.TimeoutExpired) as error:
+    raise RuntimeError(f"BVH8 inspection failed for {path.name}: {error}") from error
+  if result.returncode != 0:
+    detail = (result.stderr or result.stdout).strip()
+    raise RuntimeError(f"BVH8 inspection failed for {path.name}: {detail or f'exit {result.returncode}'}")
+  try:
+    value = json.loads(result.stdout)
+  except json.JSONDecodeError as error:
+    raise RuntimeError(f"BVH8 inspector returned invalid JSON for {path.name}: {error}") from error
+  if not isinstance(value, dict):
+    raise RuntimeError(f"BVH8 inspector returned invalid data for {path.name}")
+  return value
+
+
+def validate_map_pair(name: str, bvh8_path: Path, report_path: Path) -> None:
+  try:
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+  except (OSError, UnicodeError, json.JSONDecodeError) as error:
+    raise RuntimeError(f"invalid bake report for {name}: {error}") from error
+  if not isinstance(report, dict):
+    raise RuntimeError(f"invalid bake report for {name}")
+  inspected = inspect_bvh8(bvh8_path)
+  text_fields = ("map", "source_kind", "source_crc32")
+  int_pairs = (("source_size", "source_size"), ("baked_triangles", "triangles"),
+               ("nodes", "nodes"), ("packets", "packets"), ("max_depth", "max_depth"))
+  if report.get("map") != name or inspected.get("map") != name:
+    raise RuntimeError(f"map name does not match bake/report pair for {name}")
+  if report.get("source_kind") not in {"world_physics", "nested_map_vpk"}:
+    raise RuntimeError(f"invalid source kind in bake report for {name}")
+  for field in text_fields:
+    if not isinstance(report.get(field), str) or report[field] != inspected.get(field):
+      raise RuntimeError(f"{field} does not match bake/report pair for {name}")
+  if not re.fullmatch(r"0x[0-9a-f]{8}", report["source_crc32"]):
+    raise RuntimeError(f"invalid source CRC in bake report for {name}")
+  for report_field, inspected_field in int_pairs:
+    left = report.get(report_field)
+    right = inspected.get(inspected_field)
+    if type(left) is not int or type(right) is not int or left < 0 or left != right:
+      raise RuntimeError(f"{report_field} does not match bake/report pair for {name}")
 
 
 def build_official_maps_package() -> Path:
@@ -142,6 +231,8 @@ def build_official_maps_package() -> Path:
   missing = [path.name for path in maps if not path.is_file()]
   if missing:
     raise RuntimeError(f"official map bakes or reports are missing: {', '.join(missing)}")
+  for name in map_names:
+    validate_map_pair(name, ROOT / "data" / "maps" / f"{name}.bvh8", ROOT / "data" / "maps" / f"{name}.json")
 
   out = package_root(f"cs2fow-{VERSION}-official-maps")
   copy_file(ROOT / "DATA_NOTICE", out / "DATA_NOTICE")
@@ -160,16 +251,29 @@ def sha256(path: Path) -> str:
   return digest.hexdigest()
 
 
-def write_checksums(archives: list[Path]) -> None:
+def write_checksums(archives: list[Path], require_complete: bool = False) -> None:
+  names = {path.name for path in archives}
+  expected = set(ARCHIVE_NAMES.values())
+  if require_complete and names != expected:
+    missing = ", ".join(sorted(expected - names))
+    extra = ", ".join(sorted(names - expected))
+    raise RuntimeError(f"final package set is incomplete (missing: {missing or 'none'}; extra: {extra or 'none'})")
   lines = [f"{sha256(path)}  {path.name}" for path in sorted(archives)]
   write_text(PACKAGES / "SHA256SUMS.txt", "\n".join(lines) + "\n")
   if (PACKAGES / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines() != lines:
     raise RuntimeError("checksum file verification failed")
 
 
+def current_archives() -> list[Path]:
+  return sorted(PACKAGES.glob(f"cs2fow-{VERSION}-*.zip"))
+
+
 def main() -> None:
   PACKAGES.mkdir(exist_ok=True)
   targets = sys.argv[1:] or ["windows-x86_64", "linux-x86_64", "official-maps"]
+  unknown = set(targets) - set(ARCHIVE_NAMES)
+  if unknown:
+    raise SystemExit(f"unknown package targets: {' '.join(sorted(unknown))}")
   archives: list[Path] = []
   if "windows-x86_64" in targets:
     archives.append(build_core_package(
@@ -189,7 +293,7 @@ def main() -> None:
     archives.append(build_official_maps_package())
   if not archives:
     raise SystemExit(f"no packages built for targets: {' '.join(targets)}")
-  write_checksums(archives)
+  write_checksums(current_archives(), set(targets) == set(ARCHIVE_NAMES))
 
 
 if __name__ == "__main__":
