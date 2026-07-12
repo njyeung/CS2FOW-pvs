@@ -248,8 +248,11 @@ void plugin::FireGameEvent(IGameEvent *event)
 	}
 	const float missing = std::numeric_limits<float>::quiet_NaN();
 	const vec3 center {event->GetFloat("x", missing), event->GetFloat("y", missing), event->GetFloat("z", missing)};
+	INetworkGameServer *network_server = g_pNetworkServerService == nullptr ? nullptr : g_pNetworkServerService->GetIGameServer();
+	CGlobalVars *globals = network_server == nullptr ? nullptr : network_server->GetGlobals();
+	const float game_time = globals == nullptr ? missing : globals->curtime;
 	std::lock_guard<std::mutex> lock(transmit_state_mutex_);
-	he_clearance_history_.record(center, std::chrono::steady_clock::now());
+	he_clearance_history_.record(center, game_time);
 }
 
 void plugin::OnLevelInit(char const *map_name, char const *, char const *, char const *, bool, bool)

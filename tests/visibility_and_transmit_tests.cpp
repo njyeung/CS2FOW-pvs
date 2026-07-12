@@ -123,11 +123,11 @@ void test_visibility_pair_eligibility()
 void test_smoke_occlusion()
 {
 	he_clearance_history history;
-	const auto now = std::chrono::steady_clock::now();
-	assert(!history.record({std::numeric_limits<float>::quiet_NaN(), 0, 0}, now));
+	assert(!history.record({std::numeric_limits<float>::quiet_NaN(), 0, 0}, 10.0f));
+	assert(!history.record({}, std::numeric_limits<float>::quiet_NaN()));
 	for (uint32_t index = 0; index <= k_max_he_clearances; ++index)
 	{
-		assert(history.record({static_cast<float>(index), 0, 0}, now));
+		assert(history.record({static_cast<float>(index), 0, 0}, 10.0f));
 	}
 	assert(history.count == k_max_he_clearances && history.next == 1 && history.records[0].center.x == 64.0f);
 	history.clear();
@@ -188,7 +188,12 @@ void test_smoke_occlusion()
 	smoke.he_clear_radius_units = 100.0f;
 	smoke.he_clear_seconds = 3.0f;
 	smoke.he_clearance_count = 1;
-	smoke.he_clearances[0] = {{0, 50, 0}, 2.999f};
+	smoke.he_clearances[0] = {{0, 50, 0}, 2.999f, 2.0f};
+	volume.start_time = 1.0f;
+	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
+	volume.start_time = 3.0f;
+	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
+	volume.start_time = 2.0f;
 	assert(!smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &blast_wall));
 	smoke.he_clearances[0].age_seconds = 3.0f;
@@ -201,9 +206,9 @@ void test_smoke_occlusion()
 	smoke.he_clear_seconds = 0.0f;
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {100, 0, 0}, 0.0f, &open));
 	smoke.he_clear_seconds = 3.0f;
-	smoke.he_clearances[0] = {{500, 0, 0}, 1.0f};
+	smoke.he_clearances[0] = {{500, 0, 0}, 1.0f, 2.0f};
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {700, 0, 0}, 0.0f, &open));
-	smoke.he_clearances[0] = {{0, 0, 0}, 1.0f};
+	smoke.he_clearances[0] = {{0, 0, 0}, 1.0f, 2.0f};
 	smoke.volumes.push_back(volume);
 	smoke.volumes.back().center = {500, 0, 0};
 	assert(smoke_line_blocked(smoke, {-100, 0, 0}, {700, 0, 0}, 0.0f, &open));

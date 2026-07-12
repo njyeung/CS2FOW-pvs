@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -30,6 +29,7 @@ struct smoke_volume_snapshot
 {
 	vec3 center;
 	float age_seconds {};
+	float start_time {};
 	std::array<uint8_t, k_smoke_mask_bytes> opaque_cells {};
 	std::array<float, k_smoke_cell_count> density {};
 };
@@ -38,12 +38,13 @@ struct he_smoke_clearance
 {
 	vec3 center;
 	float age_seconds {};
+	float detonation_time {};
 };
 
 struct live_he_clearance
 {
 	vec3 center;
-	std::chrono::steady_clock::time_point detonated;
+	float detonation_time {};
 };
 
 struct he_clearance_history
@@ -52,13 +53,14 @@ struct he_clearance_history
 	uint32_t count {};
 	uint32_t next {};
 
-	bool record(vec3 center, std::chrono::steady_clock::time_point now)
+	bool record(vec3 center, float detonation_time)
 	{
-		if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z))
+		if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z)
+			|| !std::isfinite(detonation_time))
 		{
 			return false;
 		}
-		records[next] = {center, now};
+		records[next] = {center, detonation_time};
 		next = (next + 1u) % static_cast<uint32_t>(records.size());
 		count = std::min(count + 1u, static_cast<uint32_t>(records.size()));
 		return true;

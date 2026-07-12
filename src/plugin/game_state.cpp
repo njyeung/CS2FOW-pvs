@@ -321,10 +321,10 @@ bool plugin::capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volu
 		for (uint32_t index = 0; index < he_clearance_history_.count; ++index)
 		{
 			const live_he_clearance &clearance = he_clearance_history_.records[index];
-			const float age = std::chrono::duration<float>(value.captured - clearance.detonated).count();
+			const float age = game_time - clearance.detonation_time;
 			if (age >= 0.0f && age < snapshot->he_clear_seconds)
 			{
-				snapshot->he_clearances[snapshot->he_clearance_count++] = {clearance.center, age};
+				snapshot->he_clearances[snapshot->he_clearance_count++] = {clearance.center, age, clearance.detonation_time};
 			}
 		}
 	}
@@ -346,6 +346,7 @@ bool plugin::capture_smokes(const std::array<CEntityInstance *, k_max_smoke_volu
 		{
 			return false;
 		}
+		snapshot->volumes.back().start_time = start_time;
 	}
 	value.smokes = std::move(snapshot);
 	return true;

@@ -200,6 +200,11 @@ bool clearance_opens_volume(const he_smoke_clearance &clearance, const smoke_vol
 	{
 		return false;
 	}
+	if (!std::isfinite(clearance.detonation_time) || !std::isfinite(volume.start_time)
+		|| clearance.detonation_time < volume.start_time)
+	{
+		return false;
+	}
 	const float box_dx = std::max(std::fabs(clearance.center.x - volume.center.x) - k_half_extent, 0.0f);
 	const float box_dy = std::max(std::fabs(clearance.center.y - volume.center.y) - k_half_extent, 0.0f);
 	const float box_dz = std::max(std::fabs(clearance.center.z - volume.center.z) - k_half_extent, 0.0f);
