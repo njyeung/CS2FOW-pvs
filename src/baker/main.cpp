@@ -106,7 +106,8 @@ std::filesystem::path vrf_path(const arguments &args)
 bool invoke_vrf(const arguments &args, const std::vector<std::string> &arguments, std::string &error)
 {
 	process_result result;
-	if (!run_process(vrf_path(args), arguments, std::chrono::minutes(10), nullptr, false, result, error))
+	if (!run_process(vrf_path(args), arguments, std::chrono::minutes(10), nullptr, false,
+		posix_process_group::inherited, result, error))
 	{
 		return false;
 	}

@@ -23,6 +23,13 @@
 #include <thread>
 #include <vector>
 
+#if defined(_WIN32)
+#include <Windows.h>
+#else
+#include <cerrno>
+#include <csignal>
+#endif
+
 namespace
 {
 
@@ -120,6 +127,36 @@ std::string read_text_file(const std::filesystem::path &path)
 {
 	std::ifstream stream(path, std::ios::binary);
 	return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+uint64_t output_pid(const std::string &output, const char *label)
+{
+	const size_t start = output.find(label);
+	assert(start != std::string::npos);
+	return std::stoull(output.substr(start + std::strlen(label)));
+}
+
+bool process_alive(uint64_t pid)
+{
+#if defined(_WIN32)
+	HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, static_cast<DWORD>(pid));
+	if (process == nullptr) return false;
+	DWORD exit_code = 0;
+	const bool alive = GetExitCodeProcess(process, &exit_code) && exit_code == STILL_ACTIVE;
+	CloseHandle(process);
+	return alive;
+#else
+	return kill(static_cast<pid_t>(pid), 0) == 0 || errno != ESRCH;
+#endif
+}
+
+void assert_process_stopped(uint64_t pid)
+{
+	for (int attempt = 0; attempt < 200 && process_alive(pid); ++attempt)
+	{
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	}
+	assert(!process_alive(pid));
 }
 
 void test_vpk(const std::filesystem::path &directory)
@@ -231,12 +268,14 @@ void test_subprocess(const std::filesystem::path &directory, const std::filesyst
 {
 	process_result result;
 	std::string error;
-	assert(run_process(executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false, result, error));
+	assert(run_process(executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false,
+		posix_process_group::isolated, result, error));
 	assert(result.exit_code == 23 && !result.cancelled && !result.timed_out);
 	assert(result.output_tail.find("probe stdout") != std::string::npos);
 	assert(result.output_tail.find("probe stderr") != std::string::npos);
 
-	assert(run_process(executable, {"--process-flood"}, std::chrono::seconds(5), nullptr, false, result, error));
+	assert(run_process(executable, {"--process-flood"}, std::chrono::seconds(5), nullptr, false,
+		posix_process_group::isolated, result, error));
 	assert(result.exit_code == 25 && result.output_tail.size() <= k_process_output_tail_bytes);
 	assert(result.output_tail.find("HEAD-MARKER") == std::string::npos);
 	assert(result.output_tail.find("TAIL-MARKER") != std::string::npos);
@@ -246,10 +285,12 @@ void test_subprocess(const std::filesystem::path &directory, const std::filesyst
 	const std::filesystem::path spaced_executable = spaced_directory / executable.filename();
 	std::filesystem::copy_file(executable, spaced_executable, std::filesystem::copy_options::overwrite_existing);
 	std::filesystem::permissions(spaced_executable, std::filesystem::status(executable).permissions());
-	assert(run_process(spaced_executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false, result, error));
+	assert(run_process(spaced_executable, {"--process-probe", "space [test]"}, std::chrono::seconds(5), nullptr, false,
+		posix_process_group::isolated, result, error));
 	assert(result.exit_code == 23);
 
-	assert(run_process(executable, {"--process-sleep"}, std::chrono::milliseconds(50), nullptr, false, result, error));
+	assert(run_process(executable, {"--process-sleep"}, std::chrono::milliseconds(50), nullptr, false,
+		posix_process_group::isolated, result, error));
 	assert(result.timed_out);
 	assert(result.output_tail.find("sleep probe") != std::string::npos);
 
@@ -258,10 +299,36 @@ void test_subprocess(const std::filesystem::path &directory, const std::filesyst
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
 		cancel.store(true);
 	});
-	assert(run_process(executable, {"--process-sleep"}, std::chrono::seconds(5), &cancel, false, result, error));
+	assert(run_process(executable, {"--process-sleep"}, std::chrono::seconds(5), &cancel, false,
+		posix_process_group::isolated, result, error));
 	canceller.join();
 	assert(result.cancelled);
 	assert(result.output_tail.find("sleep probe") != std::string::npos);
+
+	const std::filesystem::path nested_pid = directory / "nested-timeout.pid";
+	assert(run_process(executable, {"--process-nested", nested_pid.string()}, std::chrono::seconds(1), nullptr, false,
+		posix_process_group::isolated, result, error));
+	assert(result.timed_out);
+	assert_process_stopped(output_pid(result.output_tail, "parent-pid="));
+	assert(std::filesystem::exists(nested_pid));
+	assert_process_stopped(std::stoull(read_text_file(nested_pid)));
+
+	cancel.store(false);
+	const std::filesystem::path cancelled_pid = directory / "nested-cancel.pid";
+	std::thread nested_canceller([&] {
+		for (int attempt = 0; attempt < 500 && !std::filesystem::exists(cancelled_pid); ++attempt)
+		{
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		cancel.store(true);
+	});
+	assert(run_process(executable, {"--process-nested", cancelled_pid.string()}, std::chrono::seconds(5), &cancel, false,
+		posix_process_group::isolated, result, error));
+	nested_canceller.join();
+	assert(result.cancelled);
+	assert_process_stopped(output_pid(result.output_tail, "parent-pid="));
+	assert(std::filesystem::exists(cancelled_pid));
+	assert_process_stopped(std::stoull(read_text_file(cancelled_pid)));
 }
 
 void write_test_glb(const std::filesystem::path &path, const std::string &surface_property, bool include_surface_property = true)

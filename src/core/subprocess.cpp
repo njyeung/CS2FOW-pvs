@@ -108,9 +108,10 @@ bool lower_process_priority(std::string &error)
 
 bool run_process(const std::filesystem::path &executable, const std::vector<std::string> &arguments,
 	std::chrono::milliseconds timeout, const std::atomic_bool *cancel, bool low_priority,
-	process_result &result, std::string &error)
+	posix_process_group process_group, process_result &result, std::string &error)
 {
 	result = {};
+	(void)process_group;
 	if (!std::filesystem::exists(executable))
 	{
 		error = "executable not found: " + executable.string();
@@ -270,8 +271,11 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 	posix_spawn_file_actions_addclose(&file_actions, output_pipe[1]);
 	posix_spawnattr_t attributes;
 	posix_spawnattr_init(&attributes);
-	posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
-	posix_spawnattr_setpgroup(&attributes, 0);
+	if (process_group == posix_process_group::isolated)
+	{
+		posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETPGROUP);
+		posix_spawnattr_setpgroup(&attributes, 0);
+	}
 	pid_t pid = 0;
 	const int spawn_error = posix_spawn(&pid, executable_string.c_str(), &file_actions, &attributes, argv.data(), environ);
 	posix_spawn_file_actions_destroy(&file_actions);
@@ -306,6 +310,10 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 	};
 	int status = 0;
 	bool output_ok = true;
+	const auto terminate = [&]
+	{
+		kill(process_group == posix_process_group::isolated ? -pid : pid, SIGKILL);
+	};
 	for (;;)
 	{
 		output_ok = drain_output() && output_ok;
@@ -318,7 +326,7 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		if (waited < 0 && errno != EINTR)
 		{
 			const int wait_error = errno;
-			kill(-pid, SIGKILL);
+			terminate();
 			waitpid(pid, &status, 0);
 			close(output_pipe[0]);
 			error = std::string("could not wait for process: ") + std::strerror(wait_error);
@@ -327,7 +335,7 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		if (cancel != nullptr && cancel->load())
 		{
 			result.cancelled = true;
-			kill(-pid, SIGKILL);
+			terminate();
 			waitpid(pid, &status, 0);
 			output_ok = drain_output() && output_ok;
 			break;
@@ -335,7 +343,7 @@ bool run_process(const std::filesystem::path &executable, const std::vector<std:
 		if (timeout.count() > 0 && std::chrono::steady_clock::now() - started >= timeout)
 		{
 			result.timed_out = true;
-			kill(-pid, SIGKILL);
+			terminate();
 			waitpid(pid, &status, 0);
 			output_ok = drain_output() && output_ok;
 			break;
