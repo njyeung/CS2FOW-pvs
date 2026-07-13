@@ -4,139 +4,216 @@
 
 ### Server-side anti-wallhack for Counter-Strike 2 community servers
 
-[![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?style=for-the-badge&label=downloads)](https://github.com/karola3vax/CS2FOW/releases)
-[![Issues](https://img.shields.io/github/issues/karola3vax/CS2FOW?style=for-the-badge&label=issues)](https://github.com/karola3vax/CS2FOW/issues)
-[![License](https://img.shields.io/github/license/karola3vax/CS2FOW?style=for-the-badge&label=license)](LICENSE)
+[![Version](https://img.shields.io/github/v/release/karola3vax/CS2FOW?style=for-the-badge&label=version)](https://github.com/karola3vax/CS2FOW/releases/latest) [![Downloads](https://img.shields.io/github/downloads/karola3vax/CS2FOW/total?style=for-the-badge&label=downloads)](https://github.com/karola3vax/CS2FOW/releases) [![Issues](https://img.shields.io/github/issues/karola3vax/CS2FOW?style=for-the-badge&label=issues)](https://github.com/karola3vax/CS2FOW/issues) [![License](https://img.shields.io/github/license/karola3vax/CS2FOW?style=for-the-badge&label=license)](LICENSE)
 
-![CS2FOW demonstration](docs/CS2FOW.gif)
+<img src="docs/ancient.gif" width="800" alt="CS2FOW hiding players behind solid map geometry on Ancient">
 
 </div>
 
-CS2FOW is a server-side anti-wallhack plugin for Counter-Strike 2 community servers. It withholds a living enemy's visual entities when solid map walls fully block that enemy from a living opponent.
+CS2FOW stops a server from sending the live visual entities of a fully occluded player to an opponent. A wallhack cannot draw an exact position the client never received.
+
+- **Server-side:** CS2FOW runs on the community server, not on players' computers.
+- **Zero client setup:** players install nothing and the plugin does not inject into CS2 clients.
+- **Fail open:** missing, stale, or unsafe data makes CS2FOW show players normally instead of hiding them incorrectly.
+
+## Across official and custom maps
+
+The same visibility gate works from baked static collision on official maps and compatible community maps.
+
+<table>
+<tr>
+<td width="50%" align="center">
+<img src="docs/cache.gif" width="100%" alt="CS2FOW operating on the community map Cache"><br>
+<strong>Cache</strong><br>
+Community maps use the same baked visibility checks.
+</td>
+<td width="50%" align="center">
+<img src="docs/dust2b.gif" width="100%" alt="CS2FOW operating around the Dust II B site"><br>
+<strong>Dust II — B site</strong><br>
+Official-map protection around tight site entries.
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+<img src="docs/dust2long.gif" width="72%" alt="CS2FOW operating across Dust II long sightlines"><br>
+<strong>Dust II — Long</strong><br>
+The same gate across long, open sightlines.
+</td>
+</tr>
+</table>
 
 ## FAQ
 
-### What is CS2FOW?
+<details>
+<summary><strong>What is CS2FOW?</strong></summary>
 
-CS2FOW is a server-side anti-wallhack plugin for Counter-Strike 2 community servers. When solid map walls completely hide a living enemy, it can stop sending that enemy's visual entities to one opposing player.
+CS2FOW is a server-side anti-wallhack plugin for Counter-Strike 2 community servers. When solid map walls or live smoke completely block a living player, the server can stop sending that player's visual entities to one opponent.
 
 It is not a screen filter and does not run on the player's computer.
 
-### Does it work in Premier or Valve matchmaking?
+</details>
+
+<details>
+<summary><strong>Does it work in Premier or Valve matchmaking?</strong></summary>
 
 No. It requires a community or dedicated server running Metamod:Source. Valve would need to add a similar system for official matchmaking.
 
-### Do players install anything or risk a VAC ban?
+</details>
+
+<details>
+<summary><strong>Do players install anything or risk a VAC ban?</strong></summary>
 
 Players install nothing. CS2FOW runs only on the server and does not modify or inject into the CS2 client.
 
-### Can a cheat bypass it?
+</details>
 
-A cheat cannot recover an exact live enemy position that the server never sent. It can still use sound, teammate information, last-known positions, common prefire spots, and other game clues. CS2FOW reduces the main wallhack data source; it does not make all cheating impossible.
+<details>
+<summary><strong>Can a cheat bypass it?</strong></summary>
 
-### What exactly gets hidden?
+A cheat cannot recover an exact live enemy position that the server never sent. It can still use sound, teammate information, last-known positions, common prefire spots, and other game clues. CS2FOW removes the main wallhack data source; it does not make all cheating impossible.
 
-For a living enemy, CS2FOW treats only the pawn, known carried weapons, wearables, and a currently carried hostage prop as one visual group. Unknown and independent gameplay entities stay visible.
+</details>
 
-Self, dead players, spectators, and HLTV remain unfiltered. Teammates remain unfiltered by default; an optional setting applies the same visibility gate to living teammates.
+<details>
+<summary><strong>What exactly gets hidden?</strong></summary>
 
-### Can players still wallbang a hidden enemy?
+CS2FOW groups only a living player's pawn, known carried weapons, wearables, and currently carried hostage prop. Unknown and independent gameplay entities stay visible.
 
-Yes. The enemy remains fully present on the server. Movement, hit registration, penetration, damage, and game rules continue normally.
+Self, dead players, spectators, and HLTV remain unfiltered. Teammates remain unfiltered by default; an optional setting applies the same gate to living teammates.
 
-### Does it block radar cheats or sound ESP?
+</details>
+
+<details>
+<summary><strong>Can players still wallbang a hidden enemy?</strong></summary>
+
+Yes. The player remains fully present on the server. Movement, hit registration, penetration, damage, and game rules continue normally.
+
+</details>
+
+<details>
+<summary><strong>Does it block radar cheats or sound ESP?</strong></summary>
 
 It reduces radar cheats that depend on live enemy entity positions. It does not remove footsteps, gunshots, teammate information, bomb information, or every other clue.
 
-### What about smokes, doors, breakables, and moving props?
+</details>
 
-Smokes are visibility blockers. CS2FOW copies CS2's live smoke voxel grid and checks wall-clear rays against it, including changing edges, overlap, growth, fade, and grenade-made holes. Doors, breakables, and moving props are not blockers in the current preview because the baked map contains only static geometry.
+<details>
+<summary><strong>What about smokes, doors, breakables, and moving props?</strong></summary>
 
-### How does it avoid enemies appearing too late around corners?
+Smokes are visibility blockers. CS2FOW copies CS2's live smoke voxel grid and checks wall-clear rays against it, including changing edges, overlap, growth, fade, and grenade-made holes.
 
-The worker checks body points, bounding-box corners, and the held weapon muzzle. Movement prediction starts gradually above 75 units per second and is fully active at 100. It looks ahead by 75 ms plus 1.5 times the recipient's current round-trip latency, capped at 375 ms and 96 movement units per player. Left/right shoulder origins also grow with recipient RTT from 24 to 128 units by default. A 16 ms hold reduces one-tick corner flicker.
+Doors, breakables, and moving props are not blockers in the current preview because baked map data contains static geometry only.
 
-When the worker sees an enemy again, CS2FOW stops removing that enemy from normal snapshots immediately.
+</details>
 
-### Does it run expensive engine traces every tick?
+<details>
+<summary><strong>How does it avoid enemies appearing too late around corners?</strong></summary>
+
+The worker checks body points, bounding-box corners, and the held weapon muzzle. Movement prediction starts gradually above 75 units per second and becomes fully active at 100. It looks ahead using movement and recipient latency, while shoulder origins widen with latency to reduce high-ping corner pop-in. A short visibility hold reduces one-tick flicker.
+
+When the worker sees a player again, CS2FOW stops removing that player from ordinary snapshots immediately.
+
+</details>
+
+<details>
+<summary><strong>Does it run expensive engine traces every tick?</strong></summary>
 
 No. Map collision is baked into a compact BVH8 file. A background worker casts rays against that data, while `CheckTransmit` only reads the finished answer.
 
-### Do custom and Workshop maps work?
+</details>
 
-Yes, when their physics can be baked. The server can bake a mounted map automatically, and the separate Bake Service can prepare downloadable `.bvh8` and `.json` files from a public Workshop item.
+<details>
+<summary><strong>Do custom and Workshop maps work?</strong></summary>
 
-### What happens when a map changes?
+Yes, when their physics can be baked. The server can bake a mounted map automatically, and the [CS2FOW Map Baker](https://cs2fow-bake-service.onrender.com/) can prepare downloadable `.bvh8` and `.json` files from a public Workshop item.
 
-CS2FOW compares the current source CRC and size with the stored bake. A mismatched or outdated bake is rejected, the plugin shows players normally, and an automatic rebake can create current data.
+</details>
 
-### What does “fail open” mean?
+<details>
+<summary><strong>What happens when a map changes?</strong></summary>
 
-If CS2FOW is missing information or is not sure that filtering is safe, it sends players normally instead of hiding them.
+CS2FOW compares the current source CRC and size with the stored bake. A mismatched or outdated bake is rejected, players remain visible, and an automatic rebake can create current data.
+
+</details>
+
+<details>
+<summary><strong>What does "fail open" mean?</strong></summary>
+
+If CS2FOW is missing information or is not sure filtering is safe, it sends players normally instead of hiding them.
+
+</details>
 
 ## Quickstart
 
 1. Install [Metamod:Source](https://www.sourcemm.net/) on the CS2 server.
-2. Download the Windows or Linux `0.2.1-preview` core ZIP from the [CS2FOW releases page](https://github.com/karola3vax/CS2FOW/releases).
+2. Download the Windows or Linux `0.2.1-preview` core ZIP from the [releases page](https://github.com/karola3vax/CS2FOW/releases).
 3. Extract the ZIP into the server's `game/csgo` folder. Keep the folders inside the ZIP unchanged.
 4. Start the server and load a map.
 5. Run `cs2fow_status` in the server console.
 
-The first load may say that an automatic bake is in progress. The server remains playable and CS2FOW shows everyone normally until that bake finishes and validates. The optional official-maps ZIP avoids this first-load wait for the maps included in it.
+The first load may report that an automatic bake is in progress. The server remains playable and everyone stays visible until the bake finishes and validates. The optional official-maps ZIP avoids this first-load wait for its included maps.
 
-CS2FOW requires an x86-64 CPU with AVX support exposed to the operating system. Some virtual-server providers hide AVX even when the physical CPU supports it.
+CS2FOW requires an x86-64 CPU with AVX exposed to the operating system. It also verifies that its private gamedata matches the loaded CS2 server binary by file size and CRC32. After an unknown Valve update, CS2FOW stays disabled until compatible gamedata is installed.
 
-The plugin also verifies that its private gamedata matches the loaded CS2 server binary by file size and CRC32. After an unknown Valve update, CS2FOW stays disabled and sends everyone normally until updated gamedata is installed.
+## The protection boundary
 
-## What CS2FOW does
+CS2FOW hides a deliberately small visual group:
 
-CS2FOW runs only on the server. Players install nothing.
+- the player pawn;
+- active, last, and carried weapons, including carried C4;
+- wearables;
+- a currently carried hostage prop.
 
-When a living enemy is fully behind solid map geometry, CS2FOW may withhold that enemy's current visual group from one recipient's normal snapshot. The visual group includes only the pawn, known carried weapons, wearables, and a currently carried hostage prop. Planted C4, dropped objectives, grenade projectiles, infernos, sounds, and unknown entities remain independent and are never hidden merely because they refer to that player. For each entity CS2FOW actually hides, it marks the matching `dont_transmit` bit before removing the primary send bit. If either list is unavailable, it leaves the entity visible. The enemy still exists on the server, so movement, hit registration, damage, wall penetration, and game rules continue normally.
+It deliberately leaves independent gameplay entities alone. Planted C4, dropped objectives, dropped weapons, grenade projectiles, infernos, sounds, and unknown entities never disappear merely because their former owner is hidden. Movement, collision, hit registration, damage, penetration, and game rules remain server-authoritative and unchanged.
 
-This removes the main live position data used by wallhacks. It does not make every form of cheating impossible: sound, teammate information, last-known positions, and other game clues still exist.
+HLTV, spectators, dead players, and a player viewing themself are not filtered. Teammates remain visible by default; `cs2fow_filter_teammates 1` applies the same visibility gate to living teammates and may also remove their client-side markers and radar information.
 
-Live smoke also blocks visibility rays. An HE detonation opens a 100-unit viewing channel through an affected smoke for 2.5 seconds by default, but only when that smoke already existed at detonation time. Baked walls between the blast and sight line still block that opening, and overlapping smoke clouds are checked separately.
+Live smoke blocks visibility rays. An HE detonation opens a 100-unit viewing channel through affected smoke for 2.5 seconds by default, but only when the smoke already existed when the HE detonated. Walls and overlapping smoke clouds still block independently.
 
-HLTV, spectators, dead players, and a player viewing themself are not filtered. Teammates remain unfiltered by default; `cs2fow_filter_teammates 1` applies the same visibility rules to their complete visual groups and may also remove client-side teammate markers and radar information.
+## How it works
 
-## The six-step runtime flow
+1. **Load the map:** identify the mounted VPK and its physics data.
+2. **Bake static walls:** turn collision triangles into a compact eight-child bounding volume hierarchy (BVH8).
+3. **Capture players:** safely copy positions, bounds, movement, view direction, latency, and held-weapon class on the game thread.
+4. **Cast rays:** a background worker checks eight recipient origins against current and predicted body, bounds, and muzzle points.
+5. **Decide visibility:** one ray clear of both baked walls and live smoke reveals the player.
+6. **Filter the snapshot:** `CheckTransmit` marks the verified `dont_transmit` bit, then removes the matching primary send bit for each hidden visual entity.
 
-1. **Load map:** find the mounted map VPK and identify its physics data.
-2. **Bake walls:** turn static collision triangles into a compact bounding volume hierarchy with eight children per node (BVH8).
-3. **Collect player points:** copy each living player's position, movement, body bounds, eye direction, latency, and held-weapon class on the game thread.
-4. **Cast rays:** a background worker checks eight safe recipient points against up to forty-eight target points. Targets include separate current and future axis-aligned bounding box corners, fifteen custom body points, and a weapon-muzzle point. Future positions stop at baked walls instead of passing through them.
-5. **Decide visibility:** one open ray reveals the target. A short hold keeps a recently revealed target visible to reduce corner pop-in.
-6. **Withhold hidden entities:** `CheckTransmit` reads the finished decision, marks each hidden entity in the verified `dont_transmit` list, then clears its matching primary send bit.
+The worker receives copied numbers only. It never dereferences live CS2 objects.
 
-The worker receives copied numbers only. It never reads live CS2 objects.
+### Baked map geometry
 
-## Baked map geometry
+<table>
+<tr>
+<td width="52%">
+<p>The baker reduces a map's static collision to the geometry CS2FOW actually needs for line-of-sight checks. The plugin validates the BVH8 structure, source CRC, source size, and report metadata before trusting it.</p>
+<p>Mounted maps can bake automatically. Public Workshop maps can also be prepared through the <a href="https://cs2fow-bake-service.onrender.com/">CS2FOW Map Baker</a>.</p>
+</td>
+<td width="48%" align="center">
+<img src="docs/scan_cbbl.png" width="100%" alt="Static cobblestone collision mesh used by CS2FOW">
+</td>
+</tr>
+</table>
 
-This is the simplified static collision mesh CS2FOW uses for its ray checks:
+## Operating the server
 
-<div align="center">
+The plugin executes `cfg/cs2fow.cfg` after registering its convars and again at every map start. The packaged defaults enable wall and smoke filtering, leave teammate filtering off, and use Valve's `sv_enable_donttransmit 0` compatibility mode. Paired transmit-list handling also supports mode `1`.
 
-![Static map geometry seen by CS2FOW](docs/scan_cbbl.png)
+`cs2fow_status` reports activation, fail-open reasons, map and bake identity, worker, snapshot, and transmit timings, snapshot age, pair counts, smoke and HE state, teammate filtering, and automatic-bake progress.
 
-</div>
-
-## Installation and configuration
-
-The core ZIP installs these operator-facing paths:
+For entity-level evidence:
 
 ```text
-addons/cs2fow/bin/
-addons/cs2fow/gamedata/cs2fow.games.txt
-addons/metamod/cs2fow.vdf
-cfg/cs2fow.cfg
-tools/cs2fow_baker
-tools/vrf/
-licenses/
+cs2fow_debug 1              start silent evidence collection
+cs2fow_entity               list buffered records, newest first
+cs2fow_entity <edict>       show records for one entity index
+cs2fow_entity clear         clear the evidence buffer
 ```
 
-Defaults in `cfg/cs2fow.cfg` are:
+Debug records are created only for primary bits CS2FOW actually removes. Turning debugging off stops collection but preserves existing evidence until a reset or explicit clear.
+
+<details>
+<summary><strong>Complete configuration reference</strong></summary>
 
 | Setting | Default | Meaning |
 | --- | ---: | --- |
@@ -149,75 +226,59 @@ Defaults in `cfg/cs2fow.cfg` are:
 | `cs2fow_update_interval_ms` | `1` | Minimum time between player snapshots sent to the worker. |
 | `cs2fow_base_lookahead_ms` | `75` | Fixed movement lookahead before the RTT contribution. |
 | `cs2fow_rtt_lookahead_scale` | `1.5` | Multiplier applied to the recipient's current round-trip latency. |
-| `cs2fow_max_lookahead_ms` | `375` | Maximum movement/latency lookahead. Set to `0` to disable movement prediction. |
+| `cs2fow_max_lookahead_ms` | `375` | Maximum movement and latency lookahead. Set to `0` to disable movement prediction. |
 | `cs2fow_max_prediction_units` | `96` | Maximum predicted movement for each player. Set to `0` to disable movement prediction. |
-| `cs2fow_shoulder_base_units` | `24` | Minimum left/right shoulder-origin distance. |
+| `cs2fow_shoulder_base_units` | `24` | Minimum left and right shoulder-origin distance. |
 | `cs2fow_shoulder_rtt_scale` | `0.64` | Shoulder units added per millisecond of recipient RTT. |
-| `cs2fow_max_shoulder_units` | `128` | Maximum left/right shoulder-origin distance. |
+| `cs2fow_max_shoulder_units` | `128` | Maximum left and right shoulder-origin distance. |
 | `cs2fow_visibility_hold_ms` | `16` | Minimum time a newly visible pair stays visible. |
 | `cs2fow_debug` | `0` | Collect evidence for entity bits actually hidden by CS2FOW. |
 
-The plugin executes `cs2fow.cfg` after registering its convars and again at every map start. Edit this file if you choose `sv_enable_donttransmit 1`; the transmit code supports both modes.
-
-Existing custom configs must add `sv_enable_donttransmit 0` and the two HE-clearance controls shown above. They must also update the previous `50`/`150` lookahead defaults and add the RTT, prediction-distance, and shoulder controls. Older configs must replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms` and remove `cs2fow_peek_margin_units`.
+Existing custom configs must add `sv_enable_donttransmit 0` and the two HE-clearance controls. They must update the former `50`/`150` lookahead defaults, add the RTT, prediction-distance, and shoulder controls, replace `cs2fow_min_lookahead_ms` with `cs2fow_base_lookahead_ms`, and remove `cs2fow_peek_margin_units`.
 
 Automatic baking needs write access to `addons/cs2fow/data/maps`. On Linux, the packaged baker and VRF program must remain executable.
 
-## Status and debug commands
+</details>
 
-`cs2fow_status` prints whether the plugin is active, why it is fail open when inactive, map and bake details, worker, snapshot-capture, and CheckTransmit timings, true snapshot age, pair counts, smoke and HE-event availability, active HE events, teammate-filtering state, and automatic-bake progress.
+## Honest limits
 
-`cs2fow_debug 1` starts silent evidence collection. The primary-bit check required for safe paired-list handling always runs; debugging only records the bits that CS2FOW actually clears and does not print every clear.
+- Static baked geometry and live smoke are occluders. Doors, breakables, moving props, particles, projectiles, and other moving objects are not.
+- Prediction is tuned for normal competitive and casual movement. Surf, KZ, and unusually fast boosts can reveal late.
+- Larger latency compensation reduces corner pop-in by revealing players farther around corners, including while the recipient is stationary.
+- Sound, bomb information, teammate information, last-known positions, and other non-entity clues remain available.
+- Unknown CS2 server binaries disable the plugin instead of allowing unsafe private reads.
+- Full-update snapshots remain untouched. `CheckTransmit` changes neither transmit list if either required pointer is unavailable.
+- Builds and unit tests cannot reproduce a live CS2 transmit list or prove that an engine entity-copy crash is impossible. Live-server validation remains separate.
 
-Use:
+<details>
+<summary><strong>Troubleshooting</strong></summary>
 
-```text
-cs2fow_entity                 list buffered records, newest first
-cs2fow_entity <edict>         show records for one entity index
-cs2fow_entity clear           clear the evidence buffer
-```
+**`cs2fow_status` says AVX is missing:** check that the host exposes AVX and operating-system AVX state to the virtual machine. Physical CPU support is not enough if the guest cannot see it.
 
-Records show the classname, entity and source-pawn handles, recipients, reasons, count, and age. Turning debugging off stops new records but keeps existing ones until a map/plugin reset or `clear`.
-
-## Fail-open behavior and known limits
-
-“Fail open” means CS2FOW sends entities normally whenever it is unsure. Examples include missing or stale worker results, missing map data, a corrupt or outdated bake, changed map CRC/size, invalid live player state, a missing visual-group member, unavailable schema data, and unsupported CPU features.
-
-Important limits:
-
-- Private offsets are accepted only for the exact Windows or Linux server binary recorded in the bundled gamedata. Unknown builds disable CS2FOW instead of attempting unsafe reads.
-- Visibility uses baked static map geometry plus CS2's live smoke grid when smoke occlusion is enabled. Doors, breakables, props, particles, projectiles, and other moving blockers are not occluders.
-- Movement prediction targets normal competitive/casual CS2 movement. It ramps from zero between 75 and 100 horizontal units per second, caps speed at 350, and caps each player's offset at 96 units, so surf, KZ, and unusually fast boosts can appear late.
-- Shoulder origins deliberately widen with recipient RTT to reduce high-ping corner pop-in. Larger values reveal enemies farther around corners, including while the recipient is stationary.
-- Sound events, bomb information, teammate information, and other non-entity clues are not filtered.
-- Version 2 and older BVH8 files are rejected. The plugin automatically rebakes when it can and remains fail open otherwise.
-- For each set primary bit it hides, `CheckTransmit` sets the matching verified `dont_transmit` bit first and then clears the primary bit. If either list is unavailable, it changes neither. Full-update snapshots and CS2's `+16` out-of-PVS and `+24` HLTV storage are never changed.
-- Builds and unit tests cannot reproduce a live CS2 transmit list or prove that a server will never hit a game-engine entity-copy crash. Live-server packet testing is a separate validation step.
-
-## Troubleshooting
-
-**`cs2fow_status` says AVX is missing:** check that the host exposes AVX and operating-system AVX state to the virtual machine. A physical CPU supporting AVX is not enough if the guest cannot see it.
-
-**Automatic bake says permission denied on Linux:** restore execute permission and check mount/container policy:
+**Automatic bake says permission denied on Linux:** restore execute permission and check mount or container policy:
 
 ```sh
 chmod +x game/csgo/tools/cs2fow_baker
 chmod +x game/csgo/tools/vrf/linux64/Source2Viewer-CLI
 ```
 
-Automatic-baker and VRF failures include the final 8 KiB of their combined output so the useful error is available without successful-bake console spam. Cancellation and timeout terminate the complete child process tree on both platforms.
+Automatic-baker and VRF failures include the newest 8 KiB of combined output. Cancellation and timeout terminate the complete child process tree on both platforms.
 
-**`cs2fow_status` says the server binary does not match:** install a CS2FOW build with gamedata verified for the current Valve server binary. There is no unsafe override.
+**The server binary does not match:** install a CS2FOW build with gamedata verified for the current Valve server binary. There is no unsafe override.
 
-**A bake is rejected after a CS2 update:** this is expected when Valve changes the source VPK. CS2FOW compares the stored source CRC and size to the mounted map and rebakes instead of trusting stale walls.
+**A bake is rejected after a CS2 update:** this is expected when Valve changes the source VPK. CS2FOW compares stored and mounted source identity and rebakes instead of trusting stale walls.
 
-**A bug needs investigation:** include the CS2FOW version, operating system, map, `cs2fow_status` output, nearby server logs, player state (alive/dead/spectating/bot), and a short clip for visibility or pop-in issues.
+**A bug needs investigation:** include the CS2FOW version, operating system, map, `cs2fow_status` output, nearby server logs, player state, and a short clip for visibility or pop-in issues.
 
-## Developer links
+</details>
 
-- [Code tour](docs/CODE_TOUR.md): plain-language architecture, threads, safety rules, and build/release steps.
-- [Visibility point editor](tools/visibility_point_editor/README.md): view and tune the body, bounds, and muzzle samples.
-- [Bake Service](https://github.com/karola3vax/CS2FOW-Bake-Service): bounded public Workshop-map baking service.
+## Developer and project links
+
+- [Releases](https://github.com/karola3vax/CS2FOW/releases): Windows, Linux, and official-map packages.
+- [Code tour](docs/CODE_TOUR.md): plain-language architecture, threads, safety rules, and build and release steps.
+- [Visibility Studio](tools/visibility_point_editor/README.md): view and tune body, bounds, and muzzle samples.
+- [CS2FOW Map Baker](https://cs2fow-bake-service.onrender.com/): prepare visibility data from a public Workshop map.
+- [Bake Service source](https://github.com/karola3vax/CS2FOW-Bake-Service): bounded public baking service.
 
 Manual baker examples:
 
@@ -228,4 +289,4 @@ cs2fow_baker --inspect-bvh8 <file>
 cs2fow_baker --game <cs2-root> --map workshop/123/de_example --vpk <outer_dir.vpk> --output de_example.bvh8
 ```
 
-Generated map data is derived from Counter-Strike 2 game data and is covered by `DATA_NOTICE`, not the project's MIT code license. Core packages include the exact cgltf, ValveResourceFormat 19.2, native-library, and self-contained .NET notices under `licenses/`. See `LICENSE`, `THIRD_PARTY_NOTICES`, and `DATA_NOTICE`.
+Generated map data is derived from Counter-Strike 2 game data and is covered by `DATA_NOTICE`, not the project's MIT code license. Core packages include the exact cgltf, ValveResourceFormat 19.2, native-library, and self-contained .NET notices under `licenses/`. See [LICENSE](LICENSE), [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES), and [DATA_NOTICE](DATA_NOTICE).
