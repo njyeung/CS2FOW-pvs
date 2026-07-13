@@ -8,6 +8,8 @@
 
 <img src="docs/ancient.gif" width="800" alt="CS2FOW hiding players behind solid map geometry on Ancient">
 
+<img src="docs/smokeandhegrenade.gif" width="800" alt="CS2FOW hiding players behind smoke and revealing them through an HE-cleared opening">
+
 </div>
 
 CS2FOW stops your server from sending an enemy's live position when walls or smoke completely hide them. A wallhack cannot draw a player your server never sent.
