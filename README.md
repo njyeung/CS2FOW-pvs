@@ -16,28 +16,25 @@ CS2FOW stops a server from sending the live visual entities of a fully occluded 
 - **Zero client setup:** players install nothing and the plugin does not inject into CS2 clients.
 - **Fail open:** missing, stale, or unsafe data makes CS2FOW show players normally instead of hiding them incorrectly.
 
-## Across official and custom maps
+## Across different maps
 
-The same visibility gate works from baked static collision on official maps and compatible community maps.
+Each map uses its own baked static collision for visibility checks.
 
 <table>
 <tr>
 <td width="50%" align="center">
-<img src="docs/cache.gif" width="100%" alt="CS2FOW operating on the community map Cache"><br>
-<strong>Cache</strong><br>
-Community maps use the same baked visibility checks.
+<img src="docs/cache.gif" width="100%" alt="CS2FOW operating on Cache"><br>
+<strong>Cache</strong>
 </td>
 <td width="50%" align="center">
 <img src="docs/dust2b.gif" width="100%" alt="CS2FOW operating around the Dust II B site"><br>
-<strong>Dust II — B site</strong><br>
-Official-map protection around tight site entries.
+<strong>Dust II — B site</strong>
 </td>
 </tr>
 <tr>
 <td colspan="2" align="center">
 <img src="docs/dust2long.gif" width="72%" alt="CS2FOW operating across Dust II long sightlines"><br>
-<strong>Dust II — Long</strong><br>
-The same gate across long, open sightlines.
+<strong>Dust II — Long</strong>
 </td>
 </tr>
 </table>
