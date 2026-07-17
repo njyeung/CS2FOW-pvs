@@ -1,9 +1,9 @@
-// Verified against CS2 app build 24209309.
+// Verified against CS2 app build 24248951.
 // Update these values when CS2 changes the corresponding engine layouts.
 server_binary_size_windows=32793752
-server_binary_crc32_windows=3260464436
+server_binary_crc32_windows=4178875060
 server_binary_size_linux=40325784
-server_binary_crc32_linux=3013424997
+server_binary_crc32_linux=2870758565
 recipient_slot_offset_windows=576
 recipient_slot_offset_linux=576
 checktransmit_full_update_offset_windows=580

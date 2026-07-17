@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3-preview
+
+- Verified that CS2 build `24248951` keeps the same private runtime layout and updated the strict Windows/Linux server fingerprints.
+- Rebaked `cs_shelter`, `de_boulder`, `de_eldorado`, and `de_fachwerk` after their mounted map sources changed in the same update.
+
 ## 0.2.2-preview
 
 - Verified the private runtime layout and updated the strict Windows/Linux fingerprints for CS2 build `24209309`.
