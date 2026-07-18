@@ -246,22 +246,27 @@ void test_smoke_occlusion()
 void test_visibility_sampling()
 {
 	const bvh8_data open = test_world({{{10000, 10000, 10000}, {10001, 10000, 10000}, {10000, 10001, 10000}}});
-	const visibility_tuning tuning {24.0f, 0.48f, 112.0f};
+	const visibility_tuning tuning {32.0f, 0.48f, 128.0f};
 	visibility_player player {};
 	player.eye = {0, 0, 64};
 	player.origin = {0, 0, 0};
 	player.mins = {-16, -16, 0};
 	player.maxs = {16, 16, 72};
 
-	assert(std::fabs(visibility_shoulder_offset_units(-1.0f, tuning) - 24.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.0f, tuning) - 24.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.05f, tuning) - 24.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.075f, tuning) - 36.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.1f, tuning) - 48.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.15f, tuning) - 72.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.2f, tuning) - 96.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.25f, tuning) - 112.0f) < 0.01f);
-	assert(std::fabs(visibility_shoulder_offset_units(0.3f, tuning) - 112.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(-1.0f, tuning) - 32.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.0f, tuning) - 32.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.024f, tuning) - 32.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.025f, tuning) - 44.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.049f, tuning) - 44.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.05f, tuning) - 56.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.075f, tuning) - 68.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.1f, tuning) - 80.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.125f, tuning) - 92.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.15f, tuning) - 104.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.175f, tuning) - 116.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.199f, tuning) - 116.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.2f, tuning) - 128.0f) < 0.01f);
+	assert(std::fabs(visibility_shoulder_offset_units(0.3f, tuning) - 128.0f) < 0.01f);
 
 	auto origins = visibility_origins(open, player, tuning);
 	assert(k_visibility_origin_count_max == 6);
@@ -269,34 +274,34 @@ void test_visibility_sampling()
 	assert(k_visibility_ray_count_max == 144);
 	assert(origins.count == 5);
 	assert(origins.points[0].x == 0.0f && origins.points[0].z == 64.0f);
-	assert(std::fabs(origins.points[1].y - 24.0f) < 0.01f);
-	assert(std::fabs(origins.points[2].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins.points[1].y - 32.0f) < 0.01f);
+	assert(std::fabs(origins.points[2].y + 32.0f) < 0.01f);
 	assert(std::fabs(origins.points[3].z - 80.0f) < 0.01f);
 	assert(origins.points[4].x == player.origin.x && origins.points[4].y == player.origin.y
 		&& origins.points[4].z == player.origin.z);
 	player.rtt_seconds = 0.05f;
 	origins = visibility_origins(open, player, tuning);
-	assert(std::fabs(origins.points[1].y - 24.0f) < 0.01f && std::fabs(origins.points[2].y + 24.0f) < 0.01f);
+	assert(std::fabs(origins.points[1].y - 56.0f) < 0.01f && std::fabs(origins.points[2].y + 56.0f) < 0.01f);
 	player.rtt_seconds = 0.0f;
 
 	player.eye_yaw_degrees = 90.0f;
 	origins = visibility_origins(open, player, tuning);
-	assert(std::fabs(origins.points[1].x + 24.0f) < 0.01f);
-	assert(std::fabs(origins.points[2].x - 24.0f) < 0.01f);
+	assert(std::fabs(origins.points[1].x + 32.0f) < 0.01f);
+	assert(std::fabs(origins.points[2].x - 32.0f) < 0.01f);
 	player.eye_yaw_degrees = 0.0f;
 
 	player.movement_buttons = k_visibility_button_forward;
 	origins = visibility_origins(open, player, tuning);
-	assert(origins.count == 6 && std::fabs(origins.points[5].x - 24.0f) < 0.01f);
+	assert(origins.count == 6 && std::fabs(origins.points[5].x - 32.0f) < 0.01f);
 	player.movement_buttons = k_visibility_button_back;
 	origins = visibility_origins(open, player, tuning);
-	assert(origins.count == 6 && std::fabs(origins.points[5].x + 24.0f) < 0.01f);
+	assert(origins.count == 6 && std::fabs(origins.points[5].x + 32.0f) < 0.01f);
 	player.movement_buttons = k_visibility_button_left;
 	assert(visibility_origins(open, player, tuning).count == 5);
 	player.movement_buttons = k_visibility_button_right;
 	assert(visibility_origins(open, player, tuning).count == 5);
 
-	const float diagonal = 24.0f / std::sqrt(2.0f);
+	const float diagonal = 32.0f / std::sqrt(2.0f);
 	const std::array<std::pair<uint64_t, vec3>, 4> diagonals {{
 		{k_visibility_button_forward | k_visibility_button_left, {diagonal, diagonal, 64}},
 		{k_visibility_button_forward | k_visibility_button_right, {diagonal, -diagonal, 64}},
@@ -317,11 +322,11 @@ void test_visibility_sampling()
 	assert(visibility_origins(open, player, tuning).count == 5);
 	player.movement_buttons = k_visibility_button_forward | k_visibility_button_left | k_visibility_button_right;
 	origins = visibility_origins(open, player, tuning);
-	assert(origins.count == 6 && std::fabs(origins.points[5].x - 24.0f) < 0.01f);
+	assert(origins.count == 6 && std::fabs(origins.points[5].x - 32.0f) < 0.01f);
 	player.movement_buttons = k_visibility_button_forward;
 	player.eye_yaw_degrees = 90.0f;
 	origins = visibility_origins(open, player, tuning);
-	assert(origins.count == 6 && std::fabs(origins.points[5].y - 24.0f) < 0.01f);
+	assert(origins.count == 6 && std::fabs(origins.points[5].y - 32.0f) < 0.01f);
 	player.eye_yaw_degrees = 0.0f;
 
 	const bvh8_data wall = test_world({
@@ -427,7 +432,7 @@ void test_visibility_worker()
 	value.sequence = 1;
 	value.players[0] = {true, 2, {0, 0, 64}, {0, 0, 0}, {-16, -16, 0}, {16, 16, 72}};
 	value.players[1] = {true, 3, {64, 0, 64}, {64, 0, 0}, {-16, -16, 0}, {16, 16, 72}};
-	const visibility_tuning tuning {24.0f, 0.48f, 112.0f};
+	const visibility_tuning tuning {32.0f, 0.48f, 128.0f};
 
 	auto worker = std::make_unique<visibility_worker>();
 	worker->start(&wall);
@@ -798,7 +803,7 @@ void test_hidden_entity_group()
 double benchmark_worker_loop(const bvh8_data &data, const std::string &label)
 {
 	constexpr uint32_t k_players = 32;
-	const visibility_tuning tuning {24.0f, 0.48f, 112.0f};
+	const visibility_tuning tuning {32.0f, 0.48f, 128.0f};
 	std::mt19937 random(0x51f0u);
 	std::uniform_real_distribution<float> x(data.header.world_min[0], data.header.world_max[0]);
 	std::uniform_real_distribution<float> y(data.header.world_min[1], data.header.world_max[1]);

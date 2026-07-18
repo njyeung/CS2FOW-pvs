@@ -239,9 +239,9 @@ The debug buffer records only primary bits CS2FOW truly removed. Turning debug o
 | `cs2fow_he_clear_seconds` | `2.5` | Set how long an HE-opened viewing channel lasts. Use `0` to turn HE clearing off. |
 | `cs2fow_filter_teammates` | `0` | Give living teammates the same visibility checks as enemies. FFA mode is detected automatically. |
 | `cs2fow_update_interval_ms` | `1` | Wait at least this many milliseconds before sending another picture of the players to the worker. |
-| `cs2fow_shoulder_base_units` | `24` | Start the left/right shoulder and movement-intention points this far from the player's eye. |
-| `cs2fow_shoulder_rtt_scale` | `0.48` | Add this many units to those points for each millisecond of the viewing player's round-trip ping. |
-| `cs2fow_max_shoulder_units` | `112` | Never push those ping-scaled viewing points farther out than this. |
+| `cs2fow_shoulder_base_units` | `32` | Start the left/right shoulder and movement-intention points this far from the player's eye. |
+| `cs2fow_shoulder_rtt_scale` | `0.48` | Add this many units per millisecond of round-trip ping, updated in 25 ms steps. |
+| `cs2fow_max_shoulder_units` | `128` | Never push those ping-scaled viewing points farther out than this. |
 | `cs2fow_visibility_hold_ms` | `16` | Once a player becomes visible, keep them visible for at least this long to prevent flicker. |
 | `cs2fow_debug` | `0` | Save evidence about entity bits CS2FOW actually removed. It does not spam the console. |
 

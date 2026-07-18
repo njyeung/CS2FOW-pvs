@@ -15,6 +15,7 @@ namespace
 constexpr float k_horizontal_bounds_padding = 8.0f;
 constexpr float k_top_bounds_padding = 8.0f;
 constexpr float k_vertical_origin_offset = 16.0f;
+constexpr float k_ping_step_ms = 25.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
 constexpr uint32_t k_wall_clip_steps = 8;
 constexpr float k_degrees_to_radians = 0.017453292519943295769f;
@@ -187,7 +188,9 @@ float visibility_shoulder_offset_units(float rtt_seconds, const visibility_tunin
 {
 	const float base = std::max(0.0f, tuning.shoulder_base_units);
 	const float maximum = std::max(base, tuning.max_shoulder_units);
-	const float wanted = std::max(0.0f, rtt_seconds) * 1000.0f * std::max(0.0f, tuning.shoulder_rtt_scale);
+	const float rtt_ms = std::max(0.0f, rtt_seconds) * 1000.0f;
+	const float stepped_ms = std::floor(rtt_ms / k_ping_step_ms) * k_ping_step_ms;
+	const float wanted = base + stepped_ms * std::max(0.0f, tuning.shoulder_rtt_scale);
 	return std::clamp(wanted, base, maximum);
 }
 
