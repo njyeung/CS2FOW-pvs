@@ -1,0 +1,39 @@
+{
+  "version": "0.2.4-preview",
+  "source_commit": "PENDING_AFTER_CI",
+  "cs2_app_id": 730,
+  "cs2_build_id": "24248951",
+  "cs2_last_updated_unix": 1784242494,
+  "bvh8_format_version": 3,
+  "bake_recipe_version": 1,
+  "official_maps": [
+    "ar_baggage",
+    "ar_pool_day",
+    "ar_shoots",
+    "ar_shoots_night",
+    "cs_italy",
+    "cs_office",
+    "cs_shelter",
+    "de_ancient",
+    "de_ancient_night",
+    "de_anubis",
+    "de_boulder",
+    "de_cache",
+    "de_debris",
+    "de_dust2",
+    "de_eldorado",
+    "de_fachwerk",
+    "de_inferno",
+    "de_mirage",
+    "de_nuke",
+    "de_overpass",
+    "de_poseidon",
+    "de_train",
+    "de_vertigo"
+  ],
+  "artifacts": {
+    "cs2fow-0.2.4-preview-windows-x86_64.zip": "PENDING_AFTER_CI",
+    "cs2fow-0.2.4-preview-linux-x86_64.zip": "PENDING_AFTER_CI",
+    "cs2fow-0.2.4-preview-official-maps.zip": "PENDING_AFTER_CI"
+  }
+}

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4-preview
+
+- Rebuilt against the current Metamod:Source and HL2SDK so CS2FOW commands and settings register correctly after the July 17 CS2 tooling update.
+- Tightened visibility checks by reducing the upper eye origin from 24 to 16 units, AABB side/top padding from 8 to 4 units, and ping-scaled shoulder origins from `24 + 0.64 x RTT` (maximum 128) to `16 + 0.48 x RTT` (maximum 96).
+- Automatically treat every other living player as an enemy when `mp_teammates_are_enemies 1` is active.
+- Reduced the lifecycle fail-open window from 3 seconds to 1 second and removed the separate 1.5-second visual warmup while preserving the complete-group baseline check.
+- Updated Visibility Studio with a second SAS model 256 units away and the same stationary origins, target samples, and ray count used by the runtime.
+
 ## 0.2.3-preview
 
 - Verified that CS2 build `24248951` keeps the same private runtime layout and updated the strict Windows/Linux server fingerprints.
