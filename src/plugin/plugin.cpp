@@ -112,9 +112,9 @@ CConVar<float> cs2fow_he_clear_seconds("cs2fow_he_clear_seconds", FCVAR_NONE, "H
 	true, 0.0f, true, 10.0f, on_cs2fow_float_changed);
 CConVar<bool> cs2fow_filter_teammates("cs2fow_filter_teammates", FCVAR_NONE, "Apply visibility filtering to teammates", false, on_cs2fow_enable_changed);
 CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
-CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 16.0f, true, 0.0f, true, 256.0f);
+CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 24.0f, true, 0.0f, true, 256.0f);
 CConVar<float> cs2fow_shoulder_rtt_scale("cs2fow_shoulder_rtt_scale", FCVAR_NONE, "Sideways shoulder units per millisecond of recipient RTT", 0.48f, true, 0.0f, true, 4.0f);
-CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 96.0f, true, 0.0f, true, 256.0f);
+CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 112.0f, true, 0.0f, true, 256.0f);
 CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 16, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
 

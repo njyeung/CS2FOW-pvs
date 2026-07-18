@@ -44,9 +44,9 @@ struct visibility_player
 
 struct visibility_tuning
 {
-	float shoulder_base_units {16.0f};
+	float shoulder_base_units {24.0f};
 	float shoulder_rtt_scale {0.48f};
-	float max_shoulder_units {96.0f};
+	float max_shoulder_units {112.0f};
 };
 
 struct visibility_origin_points

@@ -12,8 +12,8 @@ namespace cs2fow
 namespace
 {
 
-constexpr float k_horizontal_bounds_padding = 4.0f;
-constexpr float k_top_bounds_padding = 4.0f;
+constexpr float k_horizontal_bounds_padding = 8.0f;
+constexpr float k_top_bounds_padding = 8.0f;
 constexpr float k_vertical_origin_offset = 16.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
 constexpr uint32_t k_wall_clip_steps = 8;
