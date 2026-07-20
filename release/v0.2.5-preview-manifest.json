@@ -31,5 +31,9 @@
     "de_train",
     "de_vertigo"
   ],
-  "artifacts": {}
+  "artifacts": {
+    "cs2fow-0.2.5-preview-windows-x86_64.zip": "0e6b89439f795b6fa03a3074e35159e0bec22d4b9102b6b48db054add8622c8a",
+    "cs2fow-0.2.5-preview-linux-x86_64.zip": "624aabb812e1e5037ef15a26608da15f74cb43f9876371e279dded350ba13771",
+    "cs2fow-0.2.5-preview-official-maps.zip": "e02449da552680bed2ddb7c9945b219fcf636fa382e37b838137eea7038fe8d2"
+  }
 }
