@@ -114,6 +114,11 @@ bool validate_header(const pvs_header &header, uint64_t actual_size, std::string
 		error = "invalid PVS counts";
 		return false;
 	}
+	if (header.base_cluster_count > static_cast<uint64_t>(header.pvs_bytes_per_cluster) * 8u)
+	{
+		error = "PVS cluster count exceeds the visibility row bit width";
+		return false;
+	}
 	if (!finite_bounds(header.world_min, header.world_max) || !std::isfinite(header.grid_size) || header.grid_size <= 0.0f)
 	{
 		error = "invalid PVS world bounds";
