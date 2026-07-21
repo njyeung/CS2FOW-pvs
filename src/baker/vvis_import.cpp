@@ -83,7 +83,7 @@ bool parse_float(std::string_view token, float &value)
 	return result.ec == std::errc() && result.ptr == last && !token.empty();
 }
 
-bool parse_vec3(std::string_view value, float out[3])
+bool parse_vec3_value(std::string_view value, float out[3])
 {
 	std::string_view body = trim(value);
 	if (body.size() < 2 || body.front() != '[' || body.back() != ']')
@@ -139,45 +139,55 @@ bool split_assignment(std::string_view line, std::string_view &key, std::string_
 	return !key.empty();
 }
 
-struct scalar_field
+bool find_assignment(std::string_view text, std::string_view wanted, std::string_view &value)
 {
-	std::string_view key;
-	uint32_t vvis_constants::*member;
-};
+	while (!text.empty())
+	{
+		const std::string_view line = next_line(text);
+		std::string_view key;
+		if (split_assignment(line, key, value) && key == wanted)
+		{
+			return true;
+		}
+	}
+	return false;
+}
 
-struct vec3_field
+bool parse_field(std::string_view text, std::string_view key, uint32_t &value, std::string &error)
 {
-	std::string_view key;
-	float (vvis_constants::*member)[3];
-};
+	std::string_view token;
+	if (find_assignment(text, key, token) && parse_u32(token, value))
+	{
+		return true;
+	}
+	error = "missing or invalid vvis field: ";
+	error.append(key);
+	return false;
+}
 
-struct block_field
+bool parse_field(std::string_view text, std::string_view key, float &value, std::string &error)
 {
-	std::string_view key;
-	uint32_t vvis_constants::*offset;
-	uint32_t vvis_constants::*count;
-};
+	std::string_view token;
+	if (find_assignment(text, key, token) && parse_float(token, value))
+	{
+		return true;
+	}
+	error = "missing or invalid vvis field: ";
+	error.append(key);
+	return false;
+}
 
-constexpr std::array<scalar_field, 4> k_scalar_fields {{
-	{"m_nBaseClusterCount", &vvis_constants::m_nBaseClusterCount},
-	{"m_nPVSBytesPerCluster", &vvis_constants::m_nPVSBytesPerCluster},
-	{"m_nSkyVisibilityCluster", &vvis_constants::m_nSkyVisibilityCluster},
-	{"m_nSunVisibilityCluster", &vvis_constants::m_nSunVisibilityCluster},
-}};
-
-constexpr std::array<vec3_field, 2> k_vec3_fields {{
-	{"m_vMinBounds", &vvis_constants::m_vMinBounds},
-	{"m_vMaxBounds", &vvis_constants::m_vMaxBounds},
-}};
-
-constexpr std::array<block_field, 6> k_block_fields {{
-	{"m_NodeBlock", &vvis_constants::m_NodeBlock_m_nOffset, &vvis_constants::m_NodeBlock_m_nElementCount},
-	{"m_RegionBlock", &vvis_constants::m_RegionBlock_m_nOffset, &vvis_constants::m_RegionBlock_m_nElementCount},
-	{"m_EnclosedClusterListBlock", &vvis_constants::m_EnclosedClusterListBlock_m_nOffset, &vvis_constants::m_EnclosedClusterListBlock_m_nElementCount},
-	{"m_EnclosedClustersBlock", &vvis_constants::m_EnclosedClustersBlock_m_nOffset, &vvis_constants::m_EnclosedClustersBlock_m_nElementCount},
-	{"m_MasksBlock", &vvis_constants::m_MasksBlock_m_nOffset, &vvis_constants::m_MasksBlock_m_nElementCount},
-	{"m_nVisBlocks", &vvis_constants::m_nVisBlocks_m_nOffset, &vvis_constants::m_nVisBlocks_m_nElementCount},
-}};
+bool parse_vec3(std::string_view text, std::string_view key, float value[3], std::string &error)
+{
+	std::string_view token;
+	if (find_assignment(text, key, token) && parse_vec3_value(token, value))
+	{
+		return true;
+	}
+	error = "missing or invalid vvis field: ";
+	error.append(key);
+	return false;
+}
 
 bool parse_block_body(std::string_view &text, std::string_view block_key, uint32_t &offset, uint32_t &count, std::string &error)
 {
@@ -247,6 +257,30 @@ bool parse_block_body(std::string_view &text, std::string_view block_key, uint32
 		return false;
 	}
 	return true;
+}
+
+bool parse_block(std::string_view text, std::string_view key, uint32_t &offset, uint32_t &count, std::string &error)
+{
+	while (!text.empty())
+	{
+		const std::string_view line = next_line(text);
+		std::string_view found_key;
+		std::string_view value;
+		if (!split_assignment(line, found_key, value) || found_key != key)
+		{
+			continue;
+		}
+		if (!value.empty())
+		{
+			error = "expected a block body for vvis field: ";
+			error.append(key);
+			return false;
+		}
+		return parse_block_body(text, key, offset, count, error);
+	}
+	error = "missing required vvis field: ";
+	error.append(key);
+	return false;
 }
 
 bool node_is_leaf(uint64_t node)
@@ -347,150 +381,197 @@ bool parse_vvis_text(std::string_view text, vvis_constants &out, std::string &er
 	error.clear();
 	out = {};
 
-	uint32_t found_scalars = 0;
-	uint32_t found_vec3s = 0;
-	uint32_t found_blocks = 0;
-	bool found_grid_size = false;
+	bool result = true;
+	result &= parse_field(text, "m_nBaseClusterCount", out.m_nBaseClusterCount, error);
+	result &= parse_field(text, "m_nPVSBytesPerCluster", out.m_nPVSBytesPerCluster, error);
 
-	for (;;)
+	result &= parse_vec3(text, "m_vMinBounds", out.m_vMinBounds, error);
+	result &= parse_vec3(text, "m_vMaxBounds", out.m_vMaxBounds, error);
+
+	result &= parse_field(text, "m_flGridSize", out.m_flGridSize, error);
+	result &= parse_field(text, "m_nSkyVisibilityCluster", out.m_nSkyVisibilityCluster, error);
+	result &= parse_field(text, "m_nSunVisibilityCluster", out.m_nSunVisibilityCluster, error);
+
+	result &= parse_block(text, "m_NodeBlock", out.m_NodeBlock_m_nOffset, out.m_NodeBlock_m_nElementCount, error);
+	result &= parse_block(text, "m_RegionBlock", out.m_RegionBlock_m_nOffset, out.m_RegionBlock_m_nElementCount, error);
+	result &= parse_block(text, "m_EnclosedClusterListBlock", out.m_EnclosedClusterListBlock_m_nOffset, out.m_EnclosedClusterListBlock_m_nElementCount, error);
+	result &= parse_block(text, "m_EnclosedClustersBlock", out.m_EnclosedClustersBlock_m_nOffset, out.m_EnclosedClustersBlock_m_nElementCount, error);
+	result &= parse_block(text, "m_MasksBlock", out.m_MasksBlock_m_nOffset, out.m_MasksBlock_m_nElementCount, error);
+	result &= parse_block(text, "m_nVisBlocks", out.m_nVisBlocks_m_nOffset, out.m_nVisBlocks_m_nElementCount, error);
+
+	return result;
+}
+
+bool import_vvis(std::span<const std::byte> vvis_c_bytes, std::string_view kv3_text, pvs_data &out, std::string &error)
+{
+	error.clear();
+	out = {};
+
+	resource_block vxvs {};
+	if (!parse_vxvs_block(vvis_c_bytes, vxvs, error))
 	{
-		const std::string_view line = next_line(text);
-		if (line.empty())
-		{
-			break;
-		}
-		if (line == "{" || line == "}" || line.starts_with("<!--"))
-		{
-			continue;
-		}
-
-		std::string_view key;
-		std::string_view value;
-		if (!split_assignment(line, key, value))
-		{
-			error = "vvis text line is not a field assignment";
-			return false;
-		}
-
-		if (key == "m_flGridSize")
-		{
-			if (found_grid_size)
-			{
-				error = "duplicate vvis field: m_flGridSize";
-				return false;
-			}
-			if (!parse_float(value, out.m_flGridSize))
-			{
-				error = "invalid vvis field value: m_flGridSize";
-				return false;
-			}
-			found_grid_size = true;
-			continue;
-		}
-
-		bool matched = false;
-		for (size_t i = 0; i < k_scalar_fields.size() && !matched; ++i)
-		{
-			if (key != k_scalar_fields[i].key)
-			{
-				continue;
-			}
-			if ((found_scalars & (1u << i)) != 0u)
-			{
-				error = "duplicate vvis field: ";
-				error.append(key);
-				return false;
-			}
-			if (!parse_u32(value, out.*k_scalar_fields[i].member))
-			{
-				error = "invalid vvis field value: ";
-				error.append(key);
-				return false;
-			}
-			found_scalars |= 1u << i;
-			matched = true;
-		}
-		for (size_t i = 0; i < k_vec3_fields.size() && !matched; ++i)
-		{
-			if (key != k_vec3_fields[i].key)
-			{
-				continue;
-			}
-			if ((found_vec3s & (1u << i)) != 0u)
-			{
-				error = "duplicate vvis field: ";
-				error.append(key);
-				return false;
-			}
-			if (!parse_vec3(value, out.*k_vec3_fields[i].member))
-			{
-				error = "invalid vvis field value: ";
-				error.append(key);
-				return false;
-			}
-			found_vec3s |= 1u << i;
-			matched = true;
-		}
-		for (size_t i = 0; i < k_block_fields.size() && !matched; ++i)
-		{
-			if (key != k_block_fields[i].key)
-			{
-				continue;
-			}
-			if ((found_blocks & (1u << i)) != 0u)
-			{
-				error = "duplicate vvis field: ";
-				error.append(key);
-				return false;
-			}
-			if (!value.empty())
-			{
-				error = "expected a block body for vvis field: ";
-				error.append(key);
-				return false;
-			}
-			if (!parse_block_body(text, key, out.*k_block_fields[i].offset, out.*k_block_fields[i].count, error))
-			{
-				return false;
-			}
-			found_blocks |= 1u << i;
-			matched = true;
-		}
-	}
-
-	for (size_t i = 0; i < k_scalar_fields.size(); ++i)
-	{
-		if ((found_scalars & (1u << i)) == 0u)
-		{
-			error = "missing required vvis field: ";
-			error.append(k_scalar_fields[i].key);
-			return false;
-		}
-	}
-	for (size_t i = 0; i < k_vec3_fields.size(); ++i)
-	{
-		if ((found_vec3s & (1u << i)) == 0u)
-		{
-			error = "missing required vvis field: ";
-			error.append(k_vec3_fields[i].key);
-			return false;
-		}
-	}
-	if (!found_grid_size)
-	{
-		error = "missing required vvis field: m_flGridSize";
 		return false;
 	}
-	for (size_t i = 0; i < k_block_fields.size(); ++i)
+	vvis_constants constants {};
+	if (!parse_vvis_text(kv3_text, constants, error))
 	{
-		if ((found_blocks & (1u << i)) == 0u)
+		return false;
+	}
+
+	for (int axis = 0; axis < 3; ++axis)
+	{
+		if (!std::isfinite(constants.m_vMinBounds[axis]) || !std::isfinite(constants.m_vMaxBounds[axis])
+			|| constants.m_vMinBounds[axis] >= constants.m_vMaxBounds[axis])
 		{
-			error = "missing required vvis field: ";
-			error.append(k_block_fields[i].key);
+			error = "vvis world bounds are invalid";
+			return false;
+		}
+	}
+	if (!std::isfinite(constants.m_flGridSize) || constants.m_flGridSize <= 0.0f)
+	{
+		error = "vvis grid size is invalid";
+		return false;
+	}
+
+	struct block_layout
+	{
+		std::string key;
+		uint32_t offset;
+		uint32_t count;
+		uint32_t element_size;
+	};
+	const std::array<block_layout, 6> blocks {{
+		{"m_NodeBlock", constants.m_NodeBlock_m_nOffset, constants.m_NodeBlock_m_nElementCount, 8u},
+		{"m_RegionBlock", constants.m_RegionBlock_m_nOffset, constants.m_RegionBlock_m_nElementCount, 8u},
+		{"m_EnclosedClusterListBlock", constants.m_EnclosedClusterListBlock_m_nOffset, constants.m_EnclosedClusterListBlock_m_nElementCount, 8u},
+		{"m_EnclosedClustersBlock", constants.m_EnclosedClustersBlock_m_nOffset, constants.m_EnclosedClustersBlock_m_nElementCount, 2u},
+		{"m_MasksBlock", constants.m_MasksBlock_m_nOffset, constants.m_MasksBlock_m_nElementCount, 8u},
+		{"m_nVisBlocks", constants.m_nVisBlocks_m_nOffset, constants.m_nVisBlocks_m_nElementCount, 1u},
+	}};
+	uint64_t expected_offset = 0;
+	for (const block_layout &block : blocks)
+	{
+		uint64_t block_bytes = 0;
+		uint64_t block_end = 0;
+		if (!checked_multiply(block.count, block.element_size, block_bytes)
+			|| !checked_add(block.offset, block_bytes, block_end)
+			|| block_end > vxvs.size)
+		{
+			error = "vvis " + block.key + " block extends past the VXVS block";
+			return false;
+		}
+		if (block.offset != expected_offset)
+		{
+			error = "vvis blocks do not tile the VXVS block without gaps or overlaps";
+			return false;
+		}
+		expected_offset = block_end;
+	}
+	if (expected_offset != vxvs.size)
+	{
+		error = "vvis blocks do not tile the VXVS block without gaps or overlaps";
+		return false;
+	}
+	uint64_t expected_vis_bytes = 0;
+	if (!checked_multiply(static_cast<uint64_t>(constants.m_nBaseClusterCount) + 2u, constants.m_nPVSBytesPerCluster, expected_vis_bytes)
+		|| expected_vis_bytes != constants.m_nVisBlocks_m_nElementCount)
+	{
+		error = "vvis vis block size does not match the cluster count";
+		return false;
+	}
+	if (constants.m_NodeBlock_m_nElementCount == 0)
+	{
+		error = "vvis octree has no root node";
+		return false;
+	}
+
+	const std::byte *vxvs_bytes = vvis_c_bytes.data() + vxvs.offset;
+	const auto copy_u64_block = [&](uint32_t offset, uint32_t count, std::vector<uint64_t> &dest)
+	{
+		dest.resize(count);
+		if (count != 0)
+		{
+			std::memcpy(dest.data(), vxvs_bytes + offset, static_cast<size_t>(count) * sizeof(uint64_t));
+		}
+	};
+	copy_u64_block(constants.m_NodeBlock_m_nOffset, constants.m_NodeBlock_m_nElementCount, out.nodes);
+	copy_u64_block(constants.m_RegionBlock_m_nOffset, constants.m_RegionBlock_m_nElementCount, out.regions);
+	copy_u64_block(constants.m_MasksBlock_m_nOffset, constants.m_MasksBlock_m_nElementCount, out.masks);
+	out.vis.resize(static_cast<size_t>(constants.m_nBaseClusterCount) * constants.m_nPVSBytesPerCluster);
+	if (out.vis.empty())
+	{
+		error = "no vis blocks";
+		return false;
+	}
+
+	std::memcpy(out.vis.data(), vxvs_bytes + constants.m_nVisBlocks_m_nOffset, out.vis.size());
+
+
+	std::vector<uint8_t> visited(out.nodes.size(), 0u);
+	std::vector<uint32_t> stack;
+	stack.push_back(0u);
+	visited[0] = 1u;
+	uint64_t visited_count = 1;
+	while (!stack.empty())
+	{
+		const uint32_t index = stack.back();
+		stack.pop_back();
+		const uint64_t node = out.nodes[index];
+		if (node_is_leaf(node))
+		{
+			const uint64_t region_start = node_offset(node);
+			const uint64_t region_count = node_region_count(node);
+			if (region_start + region_count > out.regions.size())
+			{
+				error = "vvis leaf references regions past the region array";
+				return false;
+			}
+			continue;
+		}
+		const uint64_t child_base = node_offset(node);
+		if (child_base + 8u > out.nodes.size())
+		{
+			error = "vvis internal node references children past the node array";
+			return false;
+		}
+		for (uint32_t child = 0; child < 8u; ++child)
+		{
+			const uint32_t child_index = static_cast<uint32_t>(child_base) + child;
+			if (visited[child_index] != 0u)
+			{
+				error = "vvis octree references a node more than once";
+				return false;
+			}
+			visited[child_index] = 1u;
+			++visited_count;
+			stack.push_back(child_index);
+		}
+	}
+	if (visited_count != out.nodes.size())
+	{
+		error = "vvis octree does not reach every node";
+		return false;
+	}
+	for (const uint64_t region : out.regions)
+	{
+		if (region_mask_index(region) >= out.masks.size())
+		{
+			error = "vvis region references a mask past the mask array";
 			return false;
 		}
 	}
 
+	out.header.base_cluster_count = constants.m_nBaseClusterCount;
+	out.header.pvs_bytes_per_cluster = constants.m_nPVSBytesPerCluster;
+	out.header.node_count = static_cast<uint32_t>(out.nodes.size());
+	out.header.region_count = static_cast<uint32_t>(out.regions.size());
+	out.header.mask_count = static_cast<uint32_t>(out.masks.size());
+	for (int axis = 0; axis < 3; ++axis)
+	{
+		out.header.world_min[axis] = constants.m_vMinBounds[axis];
+		out.header.world_max[axis] = constants.m_vMaxBounds[axis];
+	}
+	out.header.grid_size = constants.m_flGridSize;
 	return true;
 }
 

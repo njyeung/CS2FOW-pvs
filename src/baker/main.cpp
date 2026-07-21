@@ -5,11 +5,14 @@
 // and exits with an error before replacing trusted output on any failed step.
 #include "glb_import.h"
 #include "map_source.h"
+#include "pvs.h"
 #include "subprocess.h"
 #include "vpk.h"
+#include "vvis_import.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -25,11 +28,13 @@ struct arguments
 {
 	std::filesystem::path game;
 	std::string map;
-	std::filesystem::path output;
+	std::filesystem::path output_bvh8;
+	std::filesystem::path output_pvs;
 	std::filesystem::path vrf;
 	std::filesystem::path vpk;
 	std::filesystem::path debug_obj;
 	std::filesystem::path inspect_bvh8;
+	std::filesystem::path inspect_pvs;
 	bool low_priority {};
 	bool list_maps {};
 };
@@ -42,8 +47,19 @@ std::string json_escape(const std::string &value)
 		if (character == '\\' || character == '"')
 		{
 			result.push_back('\\');
+			result.push_back(character);
 		}
-		result.push_back(character);
+		else if (static_cast<unsigned char>(character) < 0x20u)
+		{
+			constexpr char digits[] = "0123456789abcdef";
+			result.append("\\u00");
+			result.push_back(digits[(static_cast<unsigned char>(character) >> 4) & 0xfu]);
+			result.push_back(digits[static_cast<unsigned char>(character) & 0xfu]);
+		}
+		else
+		{
+			result.push_back(character);
+		}
 	}
 	return result;
 }
@@ -65,12 +81,17 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			result.inspect_bvh8 = argv[++i];
 		}
-		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--vrf" || option == "--vpk" || option == "--debug-obj") && i + 1 < argc)
+		else if (option == "--inspect-pvs" && i + 1 < argc)
+		{
+			result.inspect_pvs = argv[++i];
+		}
+		else if ((option == "--game" || option == "--map" || option == "--output-bvh8" || option == "--output-pvs" || option == "--vrf" || option == "--vpk" || option == "--debug-obj") && i + 1 < argc)
 		{
 			const std::string value = argv[++i];
 			if (option == "--game") result.game = value;
 			else if (option == "--map") result.map = value;
-			else if (option == "--output") result.output = value;
+			else if (option == "--output-bvh8") result.output_bvh8 = value;
+			else if (option == "--output-pvs") result.output_pvs = value;
 			else if (option == "--vrf") result.vrf = value;
 			else if (option == "--vpk") result.vpk = value;
 			else result.debug_obj = value;
@@ -80,10 +101,11 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 			return false;
 		}
 	}
-	if (!result.inspect_bvh8.empty())
+	if (!result.inspect_bvh8.empty() || !result.inspect_pvs.empty())
 	{
-		return !result.list_maps && result.game.empty() && result.map.empty() && result.output.empty()
-			&& result.vrf.empty() && result.vpk.empty() && result.debug_obj.empty() && !result.low_priority;
+		return (result.inspect_bvh8.empty() || result.inspect_pvs.empty()) && !result.list_maps && result.game.empty()
+			&& result.map.empty() && result.output_bvh8.empty() && result.output_pvs.empty() && result.vrf.empty()
+			&& result.vpk.empty() && result.debug_obj.empty() && !result.low_priority;
 	}
 	if (result.list_maps)
 	{
@@ -93,9 +115,13 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 	{
 		return false;
 	}
-	if (result.output.empty())
+	if (result.output_bvh8.empty())
 	{
-		result.output = result.map + ".bvh8";
+		result.output_bvh8 = result.map + ".bvh8";
+	}
+	if (result.output_pvs.empty())
+	{
+		result.output_pvs = result.map + ".pvs";
 	}
 	return true;
 }
@@ -136,12 +162,12 @@ bool invoke_vrf(const arguments &args, const std::vector<std::string> &arguments
 	return true;
 }
 
-std::filesystem::path find_vrf_output(const std::filesystem::path &directory)
+std::filesystem::path find_vrf_output(const std::filesystem::path &directory, std::string_view suffix, uintmax_t minimum_size)
 {
 	std::error_code error;
 	for (const auto &entry : std::filesystem::recursive_directory_iterator(directory, error))
 	{
-		if (entry.is_regular_file() && entry.path().filename().string().ends_with("_physics.glb") && entry.file_size() > 1024)
+		if (entry.is_regular_file() && entry.path().filename().string().ends_with(suffix) && entry.file_size() > minimum_size)
 		{
 			return entry.path();
 		}
@@ -162,10 +188,26 @@ bool export_glb(const arguments &args, const std::filesystem::path &vpk, const s
 	{
 		return false;
 	}
-	glb = find_vrf_output(temporary);
+	glb = find_vrf_output(temporary, "_physics.glb", 1024);
 	if (glb.empty())
 	{
 		error = "VRF did not emit a physics GLB";
+		return false;
+	}
+	return true;
+}
+
+bool export_vvis_text(const arguments &args, const std::filesystem::path &vpk, const std::filesystem::path &temporary, std::filesystem::path &text, std::string &error)
+{
+	const std::string resource = "maps/" + args.map + "/world_visibility.vvis_c";
+	if (!invoke_vrf(args, {"-i", vpk.string(), "-o", temporary.string(), "--decompile", "--vpk_filepath", resource}, error))
+	{
+		return false;
+	}
+	text = find_vrf_output(temporary, "_visibility.vvis", 0);
+	if (text.empty())
+	{
+		error = "VRF did not emit a visibility KV3 text";
 		return false;
 	}
 	return true;
@@ -177,6 +219,55 @@ bool extract_nested_map(const map_source &source, const std::filesystem::path &t
 	const std::filesystem::path output = temporary / "nested";
 	map_vpk = output / std::filesystem::path(source.entry);
 	return extract_vpk_entry(source.vpk, source.metadata, map_vpk, error);
+}
+
+bool read_file(const std::filesystem::path &path, std::vector<std::byte> &bytes, std::string &error)
+{
+	std::ifstream stream(path, std::ios::binary | std::ios::ate);
+	if (!stream || stream.tellg() < 0)
+	{
+		error = "could not open " + path.filename().string();
+		return false;
+	}
+	bytes.resize(static_cast<size_t>(stream.tellg()));
+	stream.seekg(0);
+	stream.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	if (!stream.good())
+	{
+		error = "could not read " + path.filename().string();
+		return false;
+	}
+	return true;
+}
+
+bool gather_vvis(const arguments &args, const std::filesystem::path &vpk, const std::filesystem::path &temporary,
+	vpk_entry &vvis, std::vector<std::byte> &bytes, std::string &text, std::string &error)
+{
+	if (!find_vpk_entry(vpk, "maps/" + args.map + "/world_visibility.vvis_c", vvis, error))
+	{
+		return false;
+	}
+	const std::filesystem::path extracted = temporary / "world_visibility.vvis_c";
+	if (!extract_vpk_entry(vpk, vvis, extracted, error))
+	{
+		return false;
+	}
+	if (!read_file(extracted, bytes, error))
+	{
+		return false;
+	}
+	std::filesystem::path decompiled;
+	if (!export_vvis_text(args, vpk, temporary, decompiled, error))
+	{
+		return false;
+	}
+	std::vector<std::byte> text_bytes;
+	if (!read_file(decompiled, text_bytes, error))
+	{
+		return false;
+	}
+	text.assign(reinterpret_cast<const char *>(text_bytes.data()), text_bytes.size());
+	return true;
 }
 
 bool write_obj(const std::filesystem::path &path, const std::vector<triangle> &triangles, std::string &error)
@@ -201,7 +292,7 @@ bool write_obj(const std::filesystem::path &path, const std::vector<triangle> &t
 }
 
 bool write_report(const std::filesystem::path &path, const arguments &args, const map_source &source, const vpk_entry &physics,
-	const import_report &report, const bvh8_data &data, std::string &error)
+	const import_report &report, const bvh8_data &bvh8, const pvs_data &pvs, std::string &error)
 {
 	std::ofstream stream(path, std::ios::trunc);
 	if (!stream)
@@ -218,11 +309,15 @@ bool write_report(const std::filesystem::path &path, const arguments &args, cons
 		<< "  \"physics_size\": " << physics.size << ",\n"
 		<< "  \"raw_triangles\": " << report.raw_triangles << ",\n"
 		<< "  \"accepted_triangles\": " << report.accepted_triangles << ",\n"
-		<< "  \"baked_triangles\": " << data.header.triangle_count << ",\n"
+		<< "  \"baked_triangles\": " << bvh8.header.triangle_count << ",\n"
 		<< "  \"rejected_invalid\": " << report.rejected_invalid << ",\n"
-		<< "  \"nodes\": " << data.nodes.size() << ",\n"
-		<< "  \"packets\": " << data.packets.size() << ",\n"
-		<< "  \"max_depth\": " << data.header.max_depth << ",\n"
+		<< "  \"nodes\": " << bvh8.nodes.size() << ",\n"
+		<< "  \"packets\": " << bvh8.packets.size() << ",\n"
+		<< "  \"max_depth\": " << bvh8.header.max_depth << ",\n"
+		<< "  \"pvs\": {\"vvis_crc32\": \"0x" << std::hex << std::setw(8) << std::setfill('0') << pvs.header.vvis_crc32 << std::dec
+		<< "\", \"vvis_size\": " << pvs.header.vvis_size << ", \"clusters\": " << pvs.header.base_cluster_count
+		<< ", \"pvs_bytes_per_cluster\": " << pvs.header.pvs_bytes_per_cluster << ", \"nodes\": " << pvs.header.node_count
+		<< ", \"regions\": " << pvs.header.region_count << ", \"masks\": " << pvs.header.mask_count << "},\n"
 		<< "  \"groups\": [\n";
 	for (size_t i = 0; i < report.groups.size(); ++i)
 	{
@@ -244,9 +339,10 @@ int run(int argc, char **argv)
 	arguments args;
 	if (!parse_arguments(argc, argv, args))
 	{
-		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--vrf <path>] [--debug-obj <file>]\n"
+		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output-bvh8 <file>] [--output-pvs <file>] [--vrf <path>] [--debug-obj <file>]\n"
 			<< "       cs2fow_baker --list-maps --vpk <file>\n"
-			<< "       cs2fow_baker --inspect-bvh8 <file>\n";
+			<< "       cs2fow_baker --inspect-bvh8 <file>\n"
+			<< "       cs2fow_baker --inspect-pvs <file>\n";
 		return 2;
 	}
 	if (!args.inspect_bvh8.empty())
@@ -265,6 +361,26 @@ int run(int argc, char **argv)
 			<< "\",\"source_size\":" << header.source_size << ",\"triangles\":" << header.triangle_count
 			<< ",\"nodes\":" << header.node_count << ",\"packets\":" << header.packet_count
 			<< ",\"max_depth\":" << header.max_depth << "}\n";
+		return 0;
+	}
+	if (!args.inspect_pvs.empty())
+	{
+		pvs_data data;
+		std::string error;
+		if (!load_pvs(args.inspect_pvs, data, error))
+		{
+			std::cerr << "cs2fow_baker: " << error << '\n';
+			return 1;
+		}
+		const pvs_header &header = data.header;
+		std::cout << "{\"map\":\"" << json_escape(header.map_name) << "\",\"source_kind\":\""
+			<< (header.flags == 0 ? "world_physics" : "nested_map_vpk") << "\",\"source_crc32\":\"0x"
+			<< std::hex << std::setw(8) << std::setfill('0') << std::nouppercase << header.source_crc32 << std::dec
+			<< "\",\"source_size\":" << header.source_size << ",\"vvis_crc32\":\"0x"
+			<< std::hex << std::setw(8) << std::setfill('0') << header.vvis_crc32 << std::dec
+			<< "\",\"vvis_size\":" << header.vvis_size << ",\"clusters\":" << header.base_cluster_count
+			<< ",\"pvs_bytes_per_cluster\":" << header.pvs_bytes_per_cluster << ",\"nodes\":" << header.node_count
+			<< ",\"regions\":" << header.region_count << ",\"masks\":" << header.mask_count << "}\n";
 		return 0;
 	}
 	if (args.list_maps)
@@ -335,31 +451,63 @@ int run(int argc, char **argv)
 		std::filesystem::remove_all(temporary);
 		return 1;
 	}
+	vpk_entry vvis;
+	std::vector<std::byte> vvis_bytes;
+	std::string vvis_text;
+	if (!gather_vvis(args, map_vpk, temporary / "vvis", vvis, vvis_bytes, vvis_text, error))
+	{
+		std::cerr << "cs2fow_baker: " << error << '\n';
+		std::filesystem::remove_all(temporary);
+		return 1;
+	}
 	std::filesystem::remove_all(temporary);
 	if (args.map == "de_ancient" && physics.crc32 == 0x85c89fb4u && (report.raw_triangles != 967742u || report.accepted_triangles != 958598u))
 	{
 		std::cerr << "cs2fow_baker: Ancient fixture triangle counts do not match (raw=" << report.raw_triangles << ", accepted=" << report.accepted_triangles << ")\n";
 		return 1;
 	}
-	bvh8_data data;
-	if (!build_bvh8(triangles, data, error))
+	bvh8_data bvh8;
+	if (!build_bvh8(triangles, bvh8, error))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
 	}
-	data.header.flags = source.flags;
-	data.header.source_crc32 = source.metadata.crc32;
-	data.header.source_size = source.metadata.size;
-	std::copy_n(args.map.c_str(), std::min(args.map.size(), sizeof(data.header.map_name) - 1u), data.header.map_name);
-	if (!write_bvh8(args.output, data, error))
+	bvh8.header.flags = source.flags;
+	bvh8.header.source_crc32 = source.metadata.crc32;
+	bvh8.header.source_size = source.metadata.size;
+	std::copy_n(args.map.c_str(), std::min(args.map.size(), sizeof(bvh8.header.map_name) - 1u), bvh8.header.map_name);
+	if (!write_bvh8(args.output_bvh8, bvh8, error))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
 	}
-	bvh8_data verified;
-	if (!load_bvh8(args.output, verified, error) || verified.header.payload_crc32 != data.header.payload_crc32)
+	bvh8_data verified_bvh8;
+	if (!load_bvh8(args.output_bvh8, verified_bvh8, error) || verified_bvh8.header.payload_crc32 != bvh8.header.payload_crc32)
 	{
 		std::cerr << "cs2fow_baker: output validation failed: " << error << '\n';
+		return 1;
+	}
+	pvs_data pvs;
+	if (!import_vvis(vvis_bytes, vvis_text, pvs, error))
+	{
+		std::cerr << "cs2fow_baker: " << error << '\n';
+		return 1;
+	}
+	pvs.header.flags = source.flags;
+	pvs.header.source_crc32 = source.metadata.crc32;
+	pvs.header.source_size = source.metadata.size;
+	pvs.header.vvis_crc32 = vvis.crc32;
+	pvs.header.vvis_size = vvis.size;
+	std::copy_n(args.map.c_str(), std::min(args.map.size(), sizeof(pvs.header.map_name) - 1u), pvs.header.map_name);
+	if (!write_pvs(args.output_pvs, pvs, error))
+	{
+		std::cerr << "cs2fow_baker: " << error << '\n';
+		return 1;
+	}
+	pvs_data verified_pvs;
+	if (!load_pvs(args.output_pvs, verified_pvs, error) || verified_pvs.header.payload_crc32 != pvs.header.payload_crc32)
+	{
+		std::cerr << "cs2fow_baker: PVS output validation failed: " << error << '\n';
 		return 1;
 	}
 	if (!args.debug_obj.empty() && !write_obj(args.debug_obj, triangles, error))
@@ -367,16 +515,16 @@ int run(int argc, char **argv)
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
 	}
-	std::filesystem::path report_path = args.output;
+	std::filesystem::path report_path = args.output_bvh8;
 	report_path.replace_extension(".json");
-	if (!write_report(report_path, args, source, physics, report, data, error))
+	if (!write_report(report_path, args, source, physics, report, bvh8, pvs, error))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
 	}
 	std::cout << args.map << ": crc=0x" << std::hex << source.metadata.crc32 << std::dec << ", raw=" << report.raw_triangles
-		<< ", accepted=" << report.accepted_triangles << ", nodes=" << data.nodes.size() << ", packets=" << data.packets.size()
-		<< ", depth=" << data.header.max_depth << '\n';
+		<< ", accepted=" << report.accepted_triangles << ", nodes=" << bvh8.nodes.size() << ", packets=" << bvh8.packets.size()
+		<< ", depth=" << bvh8.header.max_depth << '\n';
 	return 0;
 }
 

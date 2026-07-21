@@ -77,11 +77,14 @@ void automatic_baker::run(bake_request request)
 	bake_completion completion;
 	completion.request = request;
 	process_result process;
+	std::filesystem::path output_pvs = request.output;
+	output_pvs.replace_extension(".pvs");
 	const std::vector<std::string> arguments {
 		"--game", request.game.string(),
 		"--map", request.map,
 		"--vpk", request.source.vpk.string(),
-		"--output", request.output.string(),
+		"--output-bvh8", request.output.string(),
+		"--output-pvs", output_pvs.string(),
 		"--vrf", request.vrf.string(),
 		"--low-priority"
 	};
