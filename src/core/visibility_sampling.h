@@ -13,8 +13,9 @@ namespace cs2fow
 {
 
 inline constexpr uint32_t k_visibility_origin_count_max = 6;
+inline constexpr uint32_t k_visibility_aabb_point_count = 8;
 inline constexpr uint32_t k_visibility_body_point_count = 15;
-inline constexpr uint32_t k_visibility_target_count_max = 24;
+inline constexpr uint32_t k_visibility_target_count_max = k_visibility_aabb_point_count + k_visibility_body_point_count + 1;
 inline constexpr uint32_t k_visibility_ray_count_max = k_visibility_origin_count_max * k_visibility_target_count_max;
 
 inline constexpr uint64_t k_visibility_button_forward = 0x8;

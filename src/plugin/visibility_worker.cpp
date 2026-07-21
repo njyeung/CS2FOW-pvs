@@ -86,12 +86,6 @@ worker_stats visibility_worker::stats() const
 	return stats_;
 }
 
-visibility_player visibility_worker::sample_player(const player_state &player)
-{
-	return {player.eye, player.origin, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds,
-		player.movement_buttons, player.muzzle_class, player.body_points, player.body_point_count};
-}
-
 void visibility_worker::run()
 {
 	for (;;)
@@ -131,8 +125,8 @@ void visibility_worker::run()
 			if (stopping_.load()) return;
 			if (current.players[recipient].valid)
 			{
-				recipient_origins[recipient] = visibility_origins(*data_, sample_player(current.players[recipient]), tuning);
-				target_points[recipient] = visibility_targets(sample_player(current.players[recipient]));
+				recipient_origins[recipient] = visibility_origins(*data_, visibility_sample(current.players[recipient]), tuning);
+				target_points[recipient] = visibility_targets(visibility_sample(current.players[recipient]));
 			}
 		}
 		for (uint32_t recipient = 0; recipient < k_max_players; ++recipient)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6-preview
+
+- Removed the private CS2 debug-overlay calls that could corrupt the client HUD and spam missing-texture errors.
+
 ## 0.2.5-preview
 
 - Made all fifteen tuned body samples follow each player's current animation. If CS2 cannot provide a safe pose, visibility falls back to the existing fixed samples.

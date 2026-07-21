@@ -75,6 +75,28 @@ const k_skeleton_edges = [
 	[1, 4], [4, 13], [1, 5], [5, 12],
 	[3, 6], [6, 8], [8, 10], [3, 7], [7, 9], [9, 11]
 ];
+// Valve's current shared CS2 player hitbox set (Source units, bone-local).
+const k_valve_hitbox_capsules = [
+	["head_0", [-1, 1.8, 0], [3.5, 0.2, 0], 4.3],
+	["neck_0", [0, -0.4, 0], [1.4, -0.2, 0], 3.5],
+	["pelvis", [-2.7, 1.1, -3.2], [-2.7, 1.1, 3.2], 6],
+	["spine_0", [1.4, 0.8, 3.1], [1.4, 0.8, -3.1], 6],
+	["spine_1", [3.8, 0.8, -2.4], [3.8, 0.4, 2.4], 6.5],
+	["spine_2", [4.8, 0.15, -4.1], [4.8, 0.15, 4.1], 6.2],
+	["spine_3", [2.5, -0.6, -6], [2.5, -0.6, 6], 5],
+	["leg_upper_l", [1.3, -0.2, 0], [16.5, -0.7, 0], 5],
+	["leg_upper_r", [-1.3, 0, -0.6], [-16.5, 0, -0.7], 5],
+	["leg_lower_l", [0.1, -0.4, 0.2], [17, -0.4, 0.7], 4],
+	["leg_lower_r", [-0.1, 0, -0.2], [-17, 0.4, -0.7], 4],
+	["ankle_l", [0, -3.43, -0.52], [8, 0.74, 0.33], 2.6],
+	["ankle_r", [-7.98, -0.75, -0.27], [-0.02, 3.44, 0.58], 2.6],
+	["hand_l", [0, 0.3, 0], [3.59, 1.15, 0.11], 2.3],
+	["hand_r", [0, -0.3, 0.02], [-3.44, -1.17, -0.09], 2.3],
+	["arm_upper_l", [0, 0, 0], [11.2, 0, 0], 3.3],
+	["arm_lower_l", [0, 0, 0], [10, 0, 0], 3],
+	["arm_upper_r", [0, 0, 0], [-11.2, 0, 0], 3.3],
+	["arm_lower_r", [0, 0, 0], [-10, 0, -0.5], 3]
+];
 const k_aabb_edges = [
 	[0, 1], [0, 2], [1, 3], [2, 3],
 	[4, 5], [4, 6], [5, 7], [6, 7],
@@ -280,6 +302,9 @@ let selected_index = 0;
 let marker_group;
 let skeleton_group;
 let skeleton_lines;
+let hitbox_group;
+let hitbox_bindings = [];
+let hitbox_capsules_enabled = true;
 let aabb_group;
 let muzzle_group;
 let ray_group;
@@ -362,9 +387,35 @@ let play_pose_elapsed = 0;
 
 function reset_camera()
 {
-	camera.position.set(8.5, 4.5, 10.5);
-	orbit.target.set(0, 1.0, 3.25);
+	if (model)
+	{
+		const center = source_to_three({x: target_pose.x, y: target_pose.y, z: target_pose.z + 36});
+		const direction = new THREE.Vector3(1, 0.45, 1).normalize();
+		camera.position.copy(center).addScaledVector(direction, 3.2);
+		camera.near = 0.02;
+		camera.far = 3000;
+		update_camera_projection();
+		orbit.target.copy(center);
+		orbit.update();
+		return;
+	}
+	camera.position.set(4.2, 2.5, 4.2);
+	orbit.target.set(0, 0.95, 0);
 	orbit.update();
+}
+
+function update_camera_projection()
+{
+	camera.aspect = window.innerWidth / window.innerHeight;
+	camera.clearViewOffset();
+	if (!play_active)
+	{
+		const inspector = $("inspector")?.getBoundingClientRect();
+		const coveredWidth = inspector ? window.innerWidth - inspector.left : 0;
+		camera.setViewOffset(window.innerWidth, window.innerHeight, coveredWidth / 2, 0,
+			window.innerWidth, window.innerHeight);
+	}
+	camera.updateProjectionMatrix();
 }
 
 function degrees_to_radians(value)
@@ -487,6 +538,7 @@ function apply_player_transforms()
 	if (viewer_model) viewer_model.visible = viewerVisible;
 	marker_group.visible = targetVisible;
 	skeleton_group.visible = targetVisible;
+	hitbox_group.visible = hitbox_capsules_enabled && targetVisible;
 	aabb_group.visible = targetVisible;
 	muzzle_group.visible = targetVisible;
 }
@@ -994,6 +1046,52 @@ function clear_group(group)
 	}
 }
 
+function rebuild_hitbox_capsules()
+{
+	clear_group(hitbox_group);
+	hitbox_bindings = [];
+	if (!model) return;
+	const bones = new Map();
+	model.traverse((node) => bones.set(node.name.toLowerCase(), node));
+	for (const [boneName, start, end, radius] of k_valve_hitbox_capsules)
+	{
+		const bone = bones.get(boneName);
+		if (!bone) continue;
+		const localStart = new THREE.Vector3(...start).divideScalar(k_source_units_per_meter);
+		const localEnd = new THREE.Vector3(...end).divideScalar(k_source_units_per_meter);
+		const geometry = new THREE.CapsuleGeometry(radius / k_source_units_per_meter,
+			localStart.distanceTo(localEnd), 6, 12);
+		const capsule = new THREE.Group();
+		const fill = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+			color: 0xff8a00, transparent: true, opacity: 0.45, depthTest: false, depthWrite: false,
+			side: THREE.DoubleSide
+		}));
+		const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 15),
+			new THREE.LineBasicMaterial({color: 0x111111, transparent: true, opacity: 0.75, depthTest: false}));
+		fill.renderOrder = 12;
+		outline.renderOrder = 13;
+		capsule.add(fill, outline);
+		hitbox_group.add(capsule);
+		hitbox_bindings.push({bone, capsule, localStart, localEnd});
+	}
+	update_hitbox_capsules();
+}
+
+function update_hitbox_capsules()
+{
+	if (!model || hitbox_bindings.length === 0) return;
+	model.updateWorldMatrix(true, true);
+	const axis = new THREE.Vector3(0, 1, 0);
+	for (const {bone, capsule, localStart, localEnd} of hitbox_bindings)
+	{
+		const start = bone.localToWorld(localStart.clone());
+		const end = bone.localToWorld(localEnd.clone());
+		const direction = end.clone().sub(start);
+		capsule.position.copy(start).add(end).multiplyScalar(0.5);
+		capsule.quaternion.setFromUnitVectors(axis, direction.normalize());
+	}
+}
+
 function dispose_root(root, disposeGeometry = false, disposeMaterials = false, disposeTextures = false)
 {
 	root?.traverse((node) =>
@@ -1034,6 +1132,7 @@ function draw_muzzle_point()
 function draw_points()
 {
 	apply_player_transforms();
+	update_hitbox_capsules();
 	transform.detach();
 	clear_group(marker_group);
 	clear_group(aabb_group);
@@ -1073,6 +1172,7 @@ function update_animated_preview()
 		return;
 	}
 	const body_positions = runtime_body_positions();
+	update_hitbox_capsules();
 	for (let index = 0; index < Math.min(body_positions.length, marker_group.children.length); ++index)
 	{
 		marker_group.children[index].position.copy(body_positions[index]);
@@ -1292,7 +1392,7 @@ function frame_box(box)
 	camera.position.copy(center).addScaledVector(direction, distance);
 	camera.near = Math.max(0.02, distance / 10000);
 	camera.far = Math.max(3000, distance * 4);
-	camera.updateProjectionMatrix();
+	update_camera_projection();
 	orbit.target.copy(center);
 	orbit.update();
 }
@@ -1499,7 +1599,7 @@ function install_loaded_map(metadata, positions)
 	update_placement_status();
 	if (has_default_spawns)
 	{
-		frame_players();
+		reset_camera();
 	}
 	else
 	{
@@ -1911,6 +2011,7 @@ function update_play_visibility()
 	{
 		if (group) group.visible = play_debug;
 	}
+	if (hitbox_group) hitbox_group.visible = hitbox_capsules_enabled && play_debug;
 	for (const group of extra_bot_debug_groups)
 	{
 		group.visible = play_debug;
@@ -1975,7 +2076,7 @@ function set_play_scope(enabled)
 {
 	play_scoped = Boolean(enabled && play_weapon_key === "awp" && !play_grenade);
 	camera.fov = play_scoped ? 15 : k_world_fov;
-	camera.updateProjectionMatrix();
+	update_camera_projection();
 	if (play_active) map_worker?.postMessage({
 		type: "play-speed",
 		value: play_scoped ? 100 : k_weapon_stats[play_weapon_key].speed
@@ -2773,7 +2874,7 @@ async function enter_play_mode()
 		play_eye_height = 64;
 		play_eye_height_target = 64;
 		camera.fov = k_world_fov;
-		camera.updateProjectionMatrix();
+		update_camera_projection();
 		play_weapon_key = primaryKey;
 		play_firing = false;
 		play_grenade_holding = false;
@@ -2860,7 +2961,7 @@ function leave_play_mode()
 	play_scoped = false;
 	player_world_action_until = 0;
 	camera.fov = k_world_fov;
-	camera.updateProjectionMatrix();
+	update_camera_projection();
 	++play_action_serial;
 	play_scheduled.length = 0;
 	play_state = null;
@@ -3561,6 +3662,7 @@ async function load_bot_model_from_url(url)
 	scene.add(model);
 	model_mixer = make_mixer({animations: model_animations}, model);
 	capture_runtime_body_bindings();
+	rebuild_hitbox_capsules();
 	refresh_animation_choices();
 	apply_player_transforms();
 	return true;
@@ -3614,6 +3716,7 @@ async function load_model_from_url(url)
 			scene.add(model);
 			model_mixer = make_mixer(gltf, model);
 			const animated = capture_runtime_body_bindings();
+			rebuild_hitbox_capsules();
 			viewer_model = clone_skeleton(model);
 			viewer_animations = model_animations;
 			apply_readable_materials(viewer_model);
@@ -3681,6 +3784,7 @@ async function load_manifest()
 			: phoenixLoaded ? "Local CT, Phoenix, and FPS assets loaded."
 				: "Phoenix is unavailable; Play uses the loaded target model.";
 		update_scene();
+		reset_camera();
 	}
 	catch (error)
 	{
@@ -3722,6 +3826,14 @@ function install_ui()
 	$("unload-map").addEventListener("click", () => unload_map());
 	$("frame-map").addEventListener("click", frame_map);
 	$("frame-players").addEventListener("click", frame_players);
+	$("hitbox-capsules").addEventListener("click", () =>
+	{
+		hitbox_capsules_enabled = !hitbox_capsules_enabled;
+		$("hitbox-capsules").setAttribute("aria-pressed", String(hitbox_capsules_enabled));
+		$("hitbox-capsules").classList.toggle("primary", hitbox_capsules_enabled);
+		if (play_active) update_play_visibility();
+		else apply_player_transforms();
+	});
 	$("map-wireframe").addEventListener("click", () =>
 	{
 		map_wireframe = !map_wireframe;
@@ -4458,7 +4570,7 @@ function run_self_checks()
 	update_status();
 	expect($("points-list").querySelectorAll('[role="option"]').length === 15, "point list count");
 	expect($("point-name").value === points[selected_index]?.name, "selected point synchronization");
-	for (const id of ["load-sas", "import-los", "export-toggle", "animation-clip", "runtime-animation", "edit-mode", "play-mode", "points-list", "point-name", "inspector", "points-disclosure", "metrics-hud", "state-hud", "play-hud", "play-result", "play-rays", "play-smokes", "play-hes", "play-bot-count", "play-debug-state", "play-view", "play-blocker", "play-bvh", "player-primary-select", "load-map", "reload-mirage", "unload-map", "place-target", "place-viewer", "viewer-ping", "shoulder-base", "shoulder-rtt-scale", "shoulder-max", "he-clear-radius", "he-clear-seconds", "simulation-seed", "mouse-sensitivity", "map-opacity", "map-focus", "map-wireframe", "frame-map", "frame-players"])
+	for (const id of ["load-sas", "import-los", "export-toggle", "animation-clip", "runtime-animation", "edit-mode", "play-mode", "points-list", "point-name", "inspector", "points-disclosure", "metrics-hud", "state-hud", "play-hud", "play-result", "play-rays", "play-smokes", "play-hes", "play-bot-count", "play-debug-state", "play-view", "play-blocker", "play-bvh", "player-primary-select", "load-map", "reload-mirage", "unload-map", "place-target", "place-viewer", "viewer-ping", "shoulder-base", "shoulder-rtt-scale", "shoulder-max", "he-clear-radius", "he-clear-seconds", "simulation-seed", "mouse-sensitivity", "map-opacity", "map-focus", "map-wireframe", "frame-map", "frame-players", "hitbox-capsules"])
 	{
 		expect(Boolean($(id)), `redesigned control: ${id}`);
 	}
@@ -4594,7 +4706,14 @@ function init_scene()
 	viewmodel_scene.add(viewmodelLight);
 
 	orbit = new OrbitControls(camera, renderer.domElement);
-	orbit.target.set(0, 1.0, 3.25);
+	orbit.target.set(0, 0.95, 0);
+	orbit.enableDamping = true;
+	orbit.dampingFactor = 0.08;
+	orbit.rotateSpeed = 0.18;
+	orbit.zoomSpeed = 0.12;
+	orbit.panSpeed = 0.22;
+	orbit.minDistance = 0.65;
+	orbit.maxDistance = 80;
 	orbit.update();
 
 	transform = new TransformControls(camera, renderer.domElement);
@@ -4621,6 +4740,7 @@ function init_scene()
 	animation_clock = new THREE.Clock();
 	marker_group = new THREE.Group();
 	skeleton_group = new THREE.Group();
+	hitbox_group = new THREE.Group();
 	aabb_group = new THREE.Group();
 	muzzle_group = new THREE.Group();
 	ray_group = new THREE.Group();
@@ -4630,7 +4750,7 @@ function init_scene()
 	grenade_group = new THREE.Group();
 	effect_group = new THREE.Group();
 	for (let index = 0; index < 2; ++index) extra_bot_debug_groups.push(new THREE.Group());
-	scene.add(ray_group, origin_group, aabb_group, skeleton_group, marker_group, muzzle_group,
+	scene.add(ray_group, origin_group, aabb_group, skeleton_group, marker_group, muzzle_group, hitbox_group,
 		nav_group, smoke_group, grenade_group, effect_group, ...extra_bot_debug_groups);
 	scene.add(new THREE.HemisphereLight(0xffffff, 0xc9cdd2, 2.4));
 	const key_light = new THREE.DirectionalLight(0xffffff, 3.2);
@@ -4660,8 +4780,7 @@ function init_scene()
 
 	window.addEventListener("resize", () =>
 	{
-		camera.aspect = window.innerWidth / window.innerHeight;
-		camera.updateProjectionMatrix();
+		update_camera_projection();
 		viewmodel_camera.aspect = camera.aspect;
 		viewmodel_camera.updateProjectionMatrix();
 		renderer.setSize(window.innerWidth, window.innerHeight);
@@ -4702,6 +4821,7 @@ function animate()
 	update_grenade_interpolation(activeDelta);
 	update_explosion_effects(activeDelta);
 	update_shot_effects(activeDelta);
+	if (orbit.enabled) orbit.update();
 	renderer.clear();
 	renderer.render(scene, camera);
 	if (viewmodel_root?.visible)

@@ -42,6 +42,12 @@ struct player_state
 	int pawn_entity {-1};
 };
 
+inline visibility_player visibility_sample(const player_state &player)
+{
+	return {player.eye, player.origin, player.mins, player.maxs, player.eye_yaw_degrees, player.rtt_seconds,
+		player.movement_buttons, player.muzzle_class, player.body_points, player.body_point_count};
+}
+
 inline bool valid_player_numbers(const player_state &player)
 {
 	const auto finite = [](vec3 value)
@@ -123,7 +129,6 @@ public:
 	worker_stats stats() const;
 
 private:
-	static visibility_player sample_player(const player_state &player);
 	void run();
 
 	const bvh8_data *data_ {};

@@ -39,6 +39,7 @@ inline constexpr uint32_t k_entity_scan_hard_limit = MAX_TOTAL_ENTITIES;
 inline constexpr uint32_t k_max_entity_name = 64;
 inline constexpr uint32_t k_max_hidden_player_entities = 1 + 2 + k_max_weapons + k_max_wearables + 1;
 inline constexpr uint32_t k_max_gamedata_offset = 4096;
+inline constexpr uint32_t k_max_vtable_index = 1024;
 inline constexpr uint32_t k_max_module_rva = 512u * 1024u * 1024u;
 inline constexpr uint8_t k_life_alive = 0;
 inline constexpr uint8_t k_team_t = 2;
@@ -89,6 +90,10 @@ struct schema_offsets
 	uint32_t death_info_time {};
 	uint32_t carried_hostage_prop {};
 	uint32_t did_smoke_effect {};
+	uint32_t beam_end_position {};
+	uint32_t beam_width {};
+	uint32_t beam_end_width {};
+	uint32_t render_color {};
 };
 
 struct smoke_private_layout
@@ -124,6 +129,12 @@ struct player_bone_cache
 	std::array<int32_t, k_visibility_body_point_count> indices {};
 	std::chrono::steady_clock::time_point retry_after {};
 	bool valid {};
+};
+
+struct los_debug_beam
+{
+	CEntityHandle handle;
+	uint32_t color {};
 };
 
 enum class hide_reason : uint8_t
@@ -206,6 +217,8 @@ private:
 	void start_automatic_bake(const std::string &map, const map_source &source, const std::filesystem::path &output,
 		const std::string &reason);
 	void poll_automatic_bake();
+	void draw_los_debug(const visibility_snapshot &value);
+	void destroy_los_debug_beams(bool remove_entities = true);
 	void activate(bvh8_data data);
 	void change_map(const std::string &map);
 	void disable(std::string reason);
@@ -245,6 +258,10 @@ private:
 	uint32_t game_event_manager_vtable_rva_ {};
 	uint32_t lookup_bone_rva_ {};
 	uint32_t get_bone_transform_rva_ {};
+	uint32_t create_entity_by_name_rva_ {};
+	uint32_t dispatch_spawn_rva_ {};
+	uint32_t remove_entity_rva_ {};
+	uint32_t teleport_vtable_index_ {};
 	uint32_t server_binary_size_ {};
 	uint32_t server_binary_crc32_ {};
 	checktransmit_private_offsets transmit_offsets_;
@@ -260,10 +277,14 @@ private:
 	automatic_baker automatic_baker_;
 	bool weapon_item_schema_available_ {};
 	bool smoke_schema_available_ {};
+	bool debug_beam_schema_available_ {};
 	bool smoke_gamedata_available_ {};
 	bool he_event_available_ {};
 	void *lookup_bone_ {};
 	void *get_bone_transform_ {};
+	void *create_entity_by_name_ {};
+	void *dispatch_spawn_ {};
+	void *remove_entity_ {};
 	he_clearance_history he_clearance_history_;
 	recent_hide_log recent_hides_;
 	std::array<lifecycle_guard, k_max_players> lifecycle_;
@@ -278,6 +299,9 @@ private:
 	uint32_t animated_players_ {};
 	uint32_t static_fallback_players_ {};
 	std::chrono::steady_clock::time_point last_snapshot_ {};
+	std::chrono::steady_clock::time_point last_los_debug_draw_ {};
+	std::array<los_debug_beam, k_visibility_target_count_max> los_debug_beams_;
+	bool los_debug_failed_ {};
 	uint64_t snapshot_sequence_ {};
 	bool prerequisites_valid_ {};
 };
@@ -294,5 +318,6 @@ extern CConVar<float> cs2fow_shoulder_rtt_scale;
 extern CConVar<float> cs2fow_max_shoulder_units;
 extern CConVar<int> cs2fow_visibility_hold_ms;
 extern CConVar<bool> cs2fow_debug;
+extern CConVar<int> cs2fow_debug_los_player;
 
 } // namespace cs2fow

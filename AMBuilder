@@ -1,4 +1,4 @@
-# Defines exactly which first-party sources enter the baker, tests, and plugin.
+# Defines exactly which project and pinned SDK sources enter each build target.
 # AMBuild supplies the compilers; this file outputs three platform build targets.
 
 import os
