@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -75,5 +76,9 @@ struct pvs_data
 bool validate_pvs(const pvs_data &data, std::string &error);
 bool load_pvs(const std::filesystem::path &path, pvs_data &data, std::string &error);
 bool write_pvs(const std::filesystem::path &path, pvs_data &data, std::string &error);
+
+bool pvs_add_point_clusters(const pvs_data &data, vec3 point, std::span<uint8_t> cluster_bits);
+bool pvs_build_visible_clusters(const pvs_data &data, std::span<const uint8_t> cluster_bits, std::span<uint8_t> visible_bits);
+bool pvs_clusters_intersect(std::span<const uint8_t> observer_visible_bits, std::span<const uint8_t> target_cluster_bits);
 
 } // namespace cs2fow

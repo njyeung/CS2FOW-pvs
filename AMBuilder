@@ -63,6 +63,7 @@ tests.compiler.cxxincludes += [os.path.join(root, 'src', 'plugin')]
 if 'NDEBUG' in tests.compiler.defines:
   tests.compiler.defines.remove('NDEBUG')
 tests.sources += geometry + map_io + [
+  os.path.join(root, 'src', 'core', 'pvs.cpp'),
   os.path.join(root, 'src', 'core', 'pvs_format.cpp'),
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
   os.path.join(root, 'src', 'core', 'smoke_occlusion.cpp'),
