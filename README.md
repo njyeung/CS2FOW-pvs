@@ -1,5 +1,7 @@
 <div align="center">
 
+This is a fork of CS2FOW. Although PVS is no longer used in CS2, its data is still available in the world_visibility.vvis. The goal is to use PVS alongside the already existing BVH8 system as an optimization. If a target's clusters do not intersect the recipient's visible clusters, we can fall-through early and skip the BVH8 traversal.
+
 # CS2FOW
 
 ### Server-side anti-wallhack for Counter-Strike 2 community servers
