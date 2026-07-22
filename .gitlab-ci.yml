@@ -12,7 +12,7 @@ linux-x86_64:
   image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk@sha256:2969e5a47146a6494c01d953cd818b1d62712f42f9e54c4809d7a3aa8dc276ce
   script:
     - apt-get -o Acquire::Retries=3 update
-    - apt-get install -y binutils ca-certificates curl g++ git nodejs python3 unzip
+    - apt-get install -y binutils ca-certificates curl g++ git python3 unzip
     - mkdir -p ../references
     - git init ../references/ambuild
     - git -C ../references/ambuild remote add origin https://github.com/alliedmodders/ambuild.git
@@ -41,13 +41,6 @@ linux-x86_64:
     - cd ..
     - ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
     - python3 -m unittest -v tests/test_package.py
-    - node --check tools/visibility_point_editor/capsule_visibility.js
-    - node --check tools/visibility_point_editor/bvh8.js
-    - node --check tools/visibility_point_editor/bvh8_worker.js
-    - node --check tools/visibility_point_editor/fps_runtime.js
-    - node --check tools/visibility_point_editor/viewer.js
-    - node tools/visibility_point_editor/check_bvh8.mjs
-    - node tools/visibility_point_editor/check_fps.mjs
     - |
       python3 - <<'PY'
       import re
@@ -84,3 +77,15 @@ linux-x86_64:
       - packages/cs2fow-*-linux-x86_64.zip
       - packages/SHA256SUMS.txt
     expire_in: 1 week
+
+studio:
+  stage: build
+  image: node:22-bookworm-slim
+  script:
+    - node --check tools/visibility_point_editor/capsule_visibility.js
+    - node --check tools/visibility_point_editor/bvh8.js
+    - node --check tools/visibility_point_editor/bvh8_worker.js
+    - node --check tools/visibility_point_editor/fps_runtime.js
+    - node --check tools/visibility_point_editor/viewer.js
+    - node tools/visibility_point_editor/check_bvh8.mjs
+    - node tools/visibility_point_editor/check_fps.mjs
