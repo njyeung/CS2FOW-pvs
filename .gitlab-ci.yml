@@ -11,7 +11,7 @@ linux-x86_64:
   stage: build
   image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk@sha256:2969e5a47146a6494c01d953cd818b1d62712f42f9e54c4809d7a3aa8dc276ce
   script:
-    - apt-get update
+    - apt-get -o Acquire::Retries=3 update
     - apt-get install -y binutils ca-certificates curl g++ git nodejs python3 unzip
     - mkdir -p ../references
     - git init ../references/ambuild
