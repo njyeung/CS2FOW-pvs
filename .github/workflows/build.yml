@@ -6,8 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  MMS_COMMIT: 0084b86af4b08614ed6b95485d072b5aa2e88cdc
-  HL2SDK_COMMIT: dc8e7324b1e7f3cb115b1a861280a30ba5ce72a2
+  MMS_COMMIT: 2667e8e5947237c4cb7ea45cec3913ad6a44757c
+  HL2SDK_COMMIT: c9e9477df7c3ad6d9b92d2bd7f20108fb3126aa9
   AMBUILD_COMMIT: d89ec91a7ac2607da07b50bb62346f9a10e9a998
   VRF_VERSION: "19.2"
 
@@ -69,7 +69,13 @@ jobs:
         run: |
           python tools/visibility_point_editor/check_points.py
           python -m unittest -v tests/test_package.py
+          node --check tools/visibility_point_editor/capsule_visibility.js
+          node --check tools/visibility_point_editor/bvh8.js
+          node --check tools/visibility_point_editor/bvh8_worker.js
+          node --check tools/visibility_point_editor/fps_runtime.js
           node --check tools/visibility_point_editor/viewer.js
+          node tools/visibility_point_editor/check_bvh8.mjs
+          node tools/visibility_point_editor/check_fps.mjs
 
       - name: Package
         run: python package.py windows-x86_64

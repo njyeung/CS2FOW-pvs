@@ -13,11 +13,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <span>
+#include <unordered_map>
+#include <vector>
 
 namespace cs2fow
 {
@@ -33,6 +37,7 @@ struct arguments
 	std::filesystem::path vrf;
 	std::filesystem::path vpk;
 	std::filesystem::path debug_obj;
+	std::filesystem::path studio_surfaces;
 	std::filesystem::path inspect_bvh8;
 	std::filesystem::path inspect_pvs;
 	bool low_priority {};
@@ -64,11 +69,11 @@ std::string json_escape(const std::string &value)
 	return result;
 }
 
-bool parse_arguments(int argc, char **argv, arguments &result)
+bool parse_arguments(std::span<const std::filesystem::path> argv, arguments &result)
 {
-	for (int i = 1; i < argc; ++i)
+	for (size_t i = 1; i < argv.size(); ++i)
 	{
-		const std::string option = argv[i];
+		const std::string option = argv[i].string();
 		if (option == "--low-priority")
 		{
 			result.low_priority = true;
@@ -77,24 +82,27 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 		{
 			result.list_maps = true;
 		}
-		else if (option == "--inspect-bvh8" && i + 1 < argc)
+		else if (option == "--inspect-bvh8" && i + 1 < argv.size())
 		{
 			result.inspect_bvh8 = argv[++i];
 		}
-		else if (option == "--inspect-pvs" && i + 1 < argc)
+		else if (option == "--inspect-pvs" && i + 1 < argv.size())
 		{
 			result.inspect_pvs = argv[++i];
 		}
-		else if ((option == "--game" || option == "--map" || option == "--output-bvh8" || option == "--output-pvs" || option == "--vrf" || option == "--vpk" || option == "--debug-obj") && i + 1 < argc)
+		else if ((option == "--game" || option == "--map" || option == "--output" || option == "--output-bvh8"
+			|| option == "--output-pvs" || option == "--vrf" || option == "--vpk" || option == "--debug-obj"
+			|| option == "--studio-surfaces") && i + 1 < argv.size())
 		{
-			const std::string value = argv[++i];
+			const std::filesystem::path value = argv[++i];
 			if (option == "--game") result.game = value;
-			else if (option == "--map") result.map = value;
-			else if (option == "--output-bvh8") result.output_bvh8 = value;
+			else if (option == "--map") result.map = value.string();
+			else if (option == "--output" || option == "--output-bvh8") result.output_bvh8 = value;
 			else if (option == "--output-pvs") result.output_pvs = value;
 			else if (option == "--vrf") result.vrf = value;
 			else if (option == "--vpk") result.vpk = value;
-			else result.debug_obj = value;
+			else if (option == "--debug-obj") result.debug_obj = value;
+			else result.studio_surfaces = value;
 		}
 		else
 		{
@@ -105,7 +113,7 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 	{
 		return (result.inspect_bvh8.empty() || result.inspect_pvs.empty()) && !result.list_maps && result.game.empty()
 			&& result.map.empty() && result.output_bvh8.empty() && result.output_pvs.empty() && result.vrf.empty()
-			&& result.vpk.empty() && result.debug_obj.empty() && !result.low_priority;
+			&& result.vpk.empty() && result.debug_obj.empty() && result.studio_surfaces.empty() && !result.low_priority;
 	}
 	if (result.list_maps)
 	{
@@ -126,6 +134,107 @@ bool parse_arguments(int argc, char **argv, arguments &result)
 	return true;
 }
 
+void append_u16(std::vector<std::byte> &bytes, uint16_t value)
+{
+	bytes.push_back(static_cast<std::byte>(value & 0xffu));
+	bytes.push_back(static_cast<std::byte>((value >> 8u) & 0xffu));
+}
+
+void write_u32(std::vector<std::byte> &bytes, size_t offset, uint32_t value)
+{
+	for (uint32_t i = 0; i < 4; ++i) bytes[offset + i] = static_cast<std::byte>((value >> (i * 8u)) & 0xffu);
+}
+
+void write_u64(std::vector<std::byte> &bytes, size_t offset, uint64_t value)
+{
+	for (uint32_t i = 0; i < 8; ++i) bytes[offset + i] = static_cast<std::byte>((value >> (i * 8u)) & 0xffu);
+}
+
+bool write_surface_sidecar(const std::filesystem::path &path, const std::string &map, const bvh8_data &data,
+	std::span<const std::string> triangle_surfaces, std::span<const uint32_t> packet_sources, std::string &error)
+{
+	constexpr size_t header_size = 128;
+	if (packet_sources.size() != data.packets.size() * 8u || triangle_surfaces.size() != data.header.triangle_count)
+	{
+		error = "Studio surface data does not match the baked triangles";
+		return false;
+	}
+	std::vector<std::string> names;
+	std::unordered_map<std::string, uint16_t> ids;
+	std::vector<uint16_t> lanes;
+	lanes.reserve(packet_sources.size());
+	for (const uint32_t source : packet_sources)
+	{
+		if (source == k_invalid_ref)
+		{
+			lanes.push_back(UINT16_MAX);
+			continue;
+		}
+		if (source >= triangle_surfaces.size())
+		{
+			error = "Studio surface source index is invalid";
+			return false;
+		}
+		const std::string &name = triangle_surfaces[source];
+		auto [it, inserted] = ids.try_emplace(name, static_cast<uint16_t>(names.size()));
+		if (inserted)
+		{
+			if (names.size() >= UINT16_MAX || name.size() > UINT16_MAX)
+			{
+				error = "Studio surface table is too large";
+				return false;
+			}
+			names.push_back(name);
+		}
+		lanes.push_back(it->second);
+	}
+	std::vector<std::byte> bytes(header_size);
+	const char magic[8] {'C', 'S', '2', 'S', 'U', 'R', 'F', '\0'};
+	std::memcpy(bytes.data(), magic, sizeof(magic));
+	write_u32(bytes, 8, 1u);
+	write_u32(bytes, 12, static_cast<uint32_t>(header_size));
+	write_u32(bytes, 16, data.header.payload_crc32);
+	write_u32(bytes, 20, static_cast<uint32_t>(data.packets.size()));
+	write_u32(bytes, 24, data.header.triangle_count);
+	write_u32(bytes, 28, static_cast<uint32_t>(names.size()));
+	std::memcpy(bytes.data() + 36, map.data(), std::min<size_t>(map.size(), 63u));
+	const uint64_t strings_offset = bytes.size();
+	for (const std::string &name : names)
+	{
+		append_u16(bytes, static_cast<uint16_t>(name.size()));
+		for (const char value : name) bytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(value)));
+	}
+	const uint64_t lanes_offset = bytes.size();
+	for (const uint16_t lane : lanes) append_u16(bytes, lane);
+	write_u32(bytes, 32, crc32(std::span<const std::byte>(bytes).subspan(header_size)));
+	write_u64(bytes, 100, strings_offset);
+	write_u64(bytes, 108, lanes_offset);
+	write_u64(bytes, 116, bytes.size());
+	std::error_code filesystem_error;
+	if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path(), filesystem_error);
+	std::filesystem::path temporary = path;
+	temporary += ".tmp";
+	std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+	stream.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	stream.close();
+	if (!stream)
+	{
+		error = "could not write Studio surface sidecar";
+		std::filesystem::remove(temporary, filesystem_error);
+		return false;
+	}
+	std::filesystem::remove(path, filesystem_error);
+	filesystem_error.clear();
+	std::filesystem::rename(temporary, path, filesystem_error);
+	if (filesystem_error)
+	{
+		error = "could not publish Studio surface sidecar";
+		std::filesystem::remove(temporary, filesystem_error);
+		return false;
+	}
+	return true;
+}
+
 std::filesystem::path vrf_path(const arguments &args)
 {
 	if (!args.vrf.empty())
@@ -139,7 +248,7 @@ std::filesystem::path vrf_path(const arguments &args)
 #endif
 }
 
-bool invoke_vrf(const arguments &args, const std::vector<std::string> &arguments, std::string &error)
+bool invoke_vrf(const arguments &args, const std::vector<std::filesystem::path> &arguments, std::string &error)
 {
 	process_result result;
 	if (!run_process(vrf_path(args), arguments, std::chrono::minutes(10), nullptr, false,
@@ -183,7 +292,7 @@ bool export_glb(const arguments &args, const std::filesystem::path &vpk, const s
 		return false;
 	}
 	const std::string resource = "maps/" + args.map + "/world_physics.vmdl_c";
-	if (!invoke_vrf(args, {"-i", vpk.string(), "-o", temporary.string(), "--decompile", "--vpk_filepath", resource,
+	if (!invoke_vrf(args, {"-i", vpk, "-o", temporary, "--decompile", "--vpk_filepath", resource,
 		"--gltf_export_format", "glb", "--gltf_export_extras"}, error))
 	{
 		return false;
@@ -334,12 +443,12 @@ bool write_report(const std::filesystem::path &path, const arguments &args, cons
 	return stream.good();
 }
 
-int run(int argc, char **argv)
+int run(std::span<const std::filesystem::path> argv)
 {
 	arguments args;
-	if (!parse_arguments(argc, argv, args))
+	if (!parse_arguments(argv, args))
 	{
-		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output-bvh8 <file>] [--output-pvs <file>] [--vrf <path>] [--debug-obj <file>]\n"
+		std::cerr << "usage: cs2fow_baker --game <cs2-root> --map <name> [--vpk <file>] [--low-priority] [--output <file>] [--output-pvs <file>] [--vrf <path>] [--debug-obj <file>] [--studio-surfaces <file>]\n"
 			<< "       cs2fow_baker --list-maps --vpk <file>\n"
 			<< "       cs2fow_baker --inspect-bvh8 <file>\n"
 			<< "       cs2fow_baker --inspect-pvs <file>\n";
@@ -444,8 +553,9 @@ int run(int argc, char **argv)
 		return 1;
 	}
 	std::vector<triangle> triangles;
+	std::vector<std::string> triangle_surfaces;
 	import_report report;
-	if (!import_physics_glb(glb, triangles, report, error))
+	if (!import_physics_glb(glb, triangles, report, error, args.studio_surfaces.empty() ? nullptr : &triangle_surfaces))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		std::filesystem::remove_all(temporary);
@@ -467,7 +577,8 @@ int run(int argc, char **argv)
 		return 1;
 	}
 	bvh8_data bvh8;
-	if (!build_bvh8(triangles, bvh8, error))
+	std::vector<uint32_t> packet_sources;
+	if (!build_bvh8(triangles, bvh8, error, args.studio_surfaces.empty() ? nullptr : &packet_sources))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
@@ -489,6 +600,12 @@ int run(int argc, char **argv)
 	}
 	pvs_data pvs;
 	if (!import_vvis(vvis_bytes, vvis_text, pvs, error))
+	{
+		std::cerr << "cs2fow_baker: " << error << '\n';
+		return 1;
+	}
+	if (!args.studio_surfaces.empty() && !write_surface_sidecar(args.studio_surfaces, args.map, bvh8,
+		triangle_surfaces, packet_sources, error))
 	{
 		std::cerr << "cs2fow_baker: " << error << '\n';
 		return 1;
@@ -531,7 +648,17 @@ int run(int argc, char **argv)
 } // namespace
 } // namespace cs2fow
 
-int main(int argc, char **argv)
+template <typename character>
+int run_main(int argc, character **argv)
 {
-	return cs2fow::run(argc, argv);
+	std::vector<std::filesystem::path> arguments;
+	arguments.reserve(static_cast<size_t>(argc));
+	for (int i = 0; i < argc; ++i) arguments.emplace_back(argv[i]);
+	return cs2fow::run(arguments);
 }
+
+#if defined(_WIN32)
+int wmain(int argc, wchar_t **argv) { return run_main(argc, argv); }
+#else
+int main(int argc, char **argv) { return run_main(argc, argv); }
+#endif

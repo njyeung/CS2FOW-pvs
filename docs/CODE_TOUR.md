@@ -2,7 +2,7 @@
 
 This guide follows CS2FOW in the same order that a person experiences it:
 
-**Load map -> bake walls -> collect player points -> cast rays -> decide visibility -> withhold hidden entities**
+**Load map -> bake walls -> collect player capsules -> test silhouettes -> decide visibility -> withhold hidden entities**
 
 It explains the intent of the code. The engine and file-format details are still in the source files beside the checks they protect.
 
@@ -18,7 +18,9 @@ It explains the intent of the code. The engine and file-format details are still
 
 **Bounding volume hierarchy with eight children per node (BVH8):** a tree of boxes that quickly skips most triangles when a ray crosses the map.
 
-**Axis-aligned bounding box (AABB):** the simple box around a player. Its eight corners are target samples.
+**Hitbox capsule:** one of Valve's rounded three-dimensional player hit volumes. Nineteen animated capsules cover the runtime target body.
+
+**Axis-aligned bounding box (AABB):** the simple collision box copied with a player for validation and supporting calculations. Its corners are not runtime LOS targets.
 
 **Valve package (VPK):** the archive format containing CS2 maps and resources.
 
@@ -46,13 +48,14 @@ It explains the intent of the code. The engine and file-format details are still
 | --- | --- |
 | `src/plugin/plugin.cpp` | Load/unload the plugin, register commands, execute its config, react to maps and frames, load valid bakes, and coordinate the other parts. |
 | `src/plugin/game_state.cpp` | Read live CS2 players and visual groups on the game thread, then make copied worker snapshots. |
-| `src/plugin/visibility_worker.*` | Own the background thread, replace pending work with the newest snapshot, cast rays, and publish results. |
+| `src/plugin/visibility_worker.*` | Own the background thread, replace pending work with the newest snapshot, evaluate capsule visibility, and publish results. |
 | `src/plugin/transmit.cpp` | Apply lifecycle rules and visibility results to the paired primary/`dont_transmit` lists; keep quarantine and debug evidence state. |
 | `src/plugin/automatic_baker.*` | Run and monitor the external baker without blocking the game thread. |
 | `src/core/bvh8.cpp` | Traverse an in-memory BVH8 and answer whether a line segment hits a triangle. |
 | `src/core/bvh8_format.cpp` | Validate, read, verify, and safely replace BVH8 version 3 files. |
 | `src/core/builder.*` | Turn accepted triangles into BVH8 nodes and triangle packets. |
-| `src/core/visibility_sampling.*` | Build recipient/target points, ping-scaled input intent, and held-weapon muzzle lengths. |
+| `src/core/visibility_sampling.*` | Define Valve capsule bindings and build ping-scaled recipient origins and the held-weapon muzzle point. |
+| `src/core/capsule_visibility.*` | Compare animated capsule silhouettes against a target-fitted CPU map depth buffer and copied live smoke. |
 | `src/core/vpk.*` | Parse VPK versions 1/2, list entries, extract them, and verify their CRCs. |
 | `src/core/map_source.*` | Find direct or nested map physics sources and validate safe map subpaths. |
 | `src/core/lifecycle_guard.h` | Fixed-size rules for player lifetimes, pair warmup, visual-group identity, and quarantine. |
@@ -61,7 +64,7 @@ It explains the intent of the code. The engine and file-format details are still
 | `src/core/subprocess.*` | Start external tools with argument lists, timeouts, cancellation, and captured output. |
 | `src/baker/` | Command-line bake sequence and physics-GLB import. |
 | `tests/` | Small assert-based tests grouped into map/BVH and visibility/transmit responsibilities. |
-| `tools/visibility_point_editor/` | Local browser tool for the LOS body, AABB, and muzzle samples only. |
+| `tools/visibility_point_editor/` | Local browser Studio for editing LOS points and simulating the runtime's BVH8, movement, visibility, smoke, and HE behavior. |
 | `cfg/`, `gamedata/`, `data/` | Shipped settings, platform offsets, and optional map bakes. |
 
 ## Bake flow
@@ -96,9 +99,10 @@ The game thread runs `hook_game_frame`. At most once per configured interval (de
 
 1. reads controllers and pawns through resolved schema fields;
 2. rejects HLTV, invalid controller/pawn links, spawning/dead players, non-T/CT teams, invalid bounds, and uncertain lifecycles;
-3. copies origin, current movement buttons, eye position/yaw, bounds, round-trip latency, team, pawn index, and held-weapon muzzle class;
-4. builds/checks visual groups for lifecycle identity, but never gives live engine pointers to the worker; and
-5. submits a plain copied `visibility_snapshot` with a rising sequence number.
+3. asks CS2 for the current pose and copies Valve's nineteen animated hitbox capsules; an incomplete or invalid pose fails open;
+4. copies origin, current movement buttons, eye position/yaw, bounds, round-trip latency, team, pawn index, and held-weapon muzzle class;
+5. builds/checks visual groups for lifecycle identity, but never gives live engine pointers to the worker; and
+6. submits a plain copied `visibility_snapshot` with a rising sequence number.
 
 `visibility_worker::submit` stores only the newest pending snapshot. Work does not form a backlog. The worker wakes, takes ownership of that copy, and computes a new result.
 
@@ -106,10 +110,11 @@ For each eligible living pair the worker:
 
 - makes five fixed recipient origins: eye, RTT-scaled left/right shoulders, eye plus 16 units, and feet;
 - adds one wall-clipped, RTT-scaled W/S or diagonal intention origin; pure A/D already uses the matching shoulder point;
-- makes target samples from padded AABB corners, fifteen tuned body points, and a held-weapon muzzle point;
-- casts at most `6 x 24 = 144` rays, testing baked walls first and then copied live smoke, and stopping at the first open ray;
+- projects the complete nineteen-capsule body into a target-fitted 32 by 32 CPU depth view, while keeping the held-weapon muzzle as a separate point;
+- proves fully covered capsule regions hidden in batches, tests remaining capsule surface samples against baked walls and copied live smoke, and stops at the first open sample;
 - lets an HE clear only smoke that already existed when the detonation was recorded on the same game clock;
-- first tries the triangle packet that blocked the same pair's earlier ray, then traverses the BVH8 if needed; and
+- reuses the triangle packet that blocked the same pair's earlier muzzle ray, then traverses the BVH8 if needed;
+- publishes a fully visible result if capsule capture, geometry evaluation, or the 75 ms cycle budget becomes uncertain; and
 - holds a newly open pair visible for `cs2fow_visibility_hold_ms`.
 
 The finished immutable result contains its sequence, capture/completion times, copied player identity, visibility matrix, timing, and pair counts. Publishing swaps a shared result; it never exposes a half-written matrix.
@@ -138,7 +143,7 @@ The primary `IsBitSet` check always runs because only set bits may enter the pai
 | Thread/caller | May read live CS2 objects? | Owns or changes | Coordination |
 | --- | --- | --- | --- |
 | Game thread | Yes | Map state, schema reads, copied player snapshots, visual-group lifecycle state | Uses `transmit_state_mutex_` when capture touches transmit lifecycle state. |
-| Visibility worker | No | One taken snapshot, ray caches, reveal holds, worker statistics, next result | `mutex_` protects pending work; `stats_mutex_` protects statistics; published result is shared immutably. |
+| Visibility worker | No | One taken snapshot, muzzle-ray caches, reveal holds, worker statistics, next result | `mutex_` protects pending work; `stats_mutex_` protects statistics; published result is shared immutably. |
 | CheckTransmit hook | Yes, only for validation/group resolution | Paired primary/`dont_transmit` bits and transmit lifecycle/quarantine/debug state | Holds `transmit_state_mutex_`; does no BVH traversal, file I/O, process work, or heap allocation. |
 | Automatic-baker thread | No live engine objects | External process and one completion record | Receives copied paths/map-source metadata; its own mutex protects status/completion. |
 | Console commands | No direct player traversal | Read status or read/clear debug records | Debug commands use `transmit_state_mutex_`. |
@@ -162,9 +167,10 @@ The BVH8 data is loaded before the worker starts and remains unchanged until tha
 
 | Change | Start here | Keep in mind |
 | --- | --- | --- |
-| Body, AABB, input-origin, or muzzle sampling | `src/core/visibility_sampling.cpp` | Keep `tools/visibility_point_editor/default_sas_visibility_points.json` and its check in sync for body points. |
+| Valve capsule bindings, input origins, or muzzle sampling | `src/core/visibility_sampling.cpp` | Runtime capsule constants must continue to match the shared player VMDL hitboxes; Studio keeps its old point solver for comparison. |
+| Capsule silhouette/depth evaluation | `src/core/capsule_visibility.cpp` | Preserve conservative sub-pixel handling, smoke/HE behavior, and fail-open deadlines. |
 | Player/schema field capture | `src/plugin/game_state.cpp` | Live engine reads remain on the game thread and uncertainty fails open. |
-| Ray scheduling, caches, or reveal hold | `src/plugin/visibility_worker.cpp` | Worker input must stay pointer-free copied data. |
+| Visibility scheduling, muzzle cache, or reveal hold | `src/plugin/visibility_worker.cpp` | Worker input must stay pointer-free copied data. |
 | Which target entities form a visual group | `collect_player_visual_group` in `game_state.cpp` | Fixed capacity, full-group validation, handles, and lifecycle identity protect transmit safety. |
 | Withholding rules or evidence | `src/plugin/transmit.cpp` | Set `dont_transmit` before clearing a set primary bit; no filtering on full updates; no allocation in the hook. |
 | VPK compatibility | `src/core/vpk.cpp` and `map_source.cpp` | Check every range/CRC and preserve direct-over-nested precedence. |
@@ -183,7 +189,7 @@ references/metamod-source
 references/hl2sdk-cs2
 ```
 
-The exact CI commits are in `.github/workflows/build.yml`.
+The exact CI commits are in `.github/workflows/build.yml` and `.gitlab-ci.yml`.
 
 Windows from a developer command prompt:
 

@@ -1,0 +1,91 @@
+stages:
+  - build
+
+variables:
+  MMS_COMMIT: "2667e8e5947237c4cb7ea45cec3913ad6a44757c"
+  HL2SDK_COMMIT: "c9e9477df7c3ad6d9b92d2bd7f20108fb3126aa9"
+  AMBUILD_COMMIT: "d89ec91a7ac2607da07b50bb62346f9a10e9a998"
+  VRF_VERSION: "19.2"
+
+linux-x86_64:
+  stage: build
+  image: registry.gitlab.steamos.cloud/steamrt/sniper/sdk@sha256:2969e5a47146a6494c01d953cd818b1d62712f42f9e54c4809d7a3aa8dc276ce
+  script:
+    - apt-get -o Acquire::Retries=3 update
+    - apt-get install -y binutils ca-certificates curl g++ git python3 unzip
+    - mkdir -p ../references
+    - git init ../references/ambuild
+    - git -C ../references/ambuild remote add origin https://github.com/alliedmodders/ambuild.git
+    - git -C ../references/ambuild fetch --depth 1 origin "$AMBUILD_COMMIT"
+    - git -C ../references/ambuild checkout --detach FETCH_HEAD
+    - git clone https://github.com/alliedmodders/metamod-source.git ../references/metamod-source
+    - git -C ../references/metamod-source checkout "$MMS_COMMIT"
+    - git -C ../references/metamod-source submodule update --init hl2sdk-manifests
+    - git clone --branch cs2 https://github.com/alliedmodders/hl2sdk.git ../references/hl2sdk-cs2
+    - git -C ../references/hl2sdk-cs2 checkout "$HL2SDK_COMMIT"
+    - tmp="$(mktemp -d)"
+    - curl -L "https://github.com/ValveResourceFormat/ValveResourceFormat/releases/download/${VRF_VERSION}/cli-linux-x64.zip" -o "$tmp/vrf.zip"
+    - echo "30d86dfd72bf35c8a38015c81bd92f0b04b1f49304e73a5d734c875803b2685b  $tmp/vrf.zip" | sha256sum -c -
+    - unzip -q "$tmp/vrf.zip" -d "$tmp/vrf"
+    - cli="$(find "$tmp/vrf" -type f -name Source2Viewer-CLI | head -n 1)"
+    - test -n "$cli"
+    - mkdir -p tools/vrf/linux64
+    - cp -a "$(dirname "$cli")/." tools/vrf/linux64/
+    - rm -f tools/vrf/linux64/libTinyEXRNative.so
+    - chmod +x tools/vrf/linux64/Source2Viewer-CLI
+    - export CC=gcc CXX=g++ PYTHONPATH="$CI_PROJECT_DIR/../references/ambuild"
+    - mkdir -p build-linux
+    - cd build-linux
+    - python3 ../configure.py
+    - python3 -c "from ambuild2.run import cli_run; cli_run()"
+    - cd ..
+    - ./build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests
+    - python3 -m unittest -v tests/test_package.py
+    - |
+      python3 - <<'PY'
+      import re
+      import subprocess
+      from pathlib import Path
+
+      limits = {"GLIBC": (2, 31), "GLIBCXX": (3, 4, 28), "CXXABI": (1, 3, 12)}
+      paths = [
+          Path("build-linux/cs2fow/linux-x86_64/cs2fow.so"),
+          Path("build-linux/cs2fow_baker/linux-x86_64/cs2fow_baker"),
+          Path("build-linux/cs2fow_tests/linux-x86_64/cs2fow_tests"),
+          *Path("tools/vrf/linux64").rglob("*"),
+      ]
+      failures = []
+      for path in paths:
+          if not path.is_file():
+              continue
+          with path.open("rb") as stream:
+              magic = stream.read(4)
+          if magic != b"\x7fELF":
+              continue
+          versions = subprocess.check_output(["readelf", "--version-info", str(path)], text=True)
+          for family, limit in limits.items():
+              found = max((tuple(map(int, value.split("."))) for value in
+                           re.findall(rf"\b{family}_(\d+(?:\.\d+)+)\b", versions)), default=())
+              if found > limit:
+                  failures.append(f"{path}: {family}_{'.'.join(map(str, found))}")
+      if failures:
+          raise SystemExit("SteamRT3 ABI exceeded:\n" + "\n".join(failures))
+      PY
+    - python3 package.py linux-x86_64
+  artifacts:
+    paths:
+      - packages/cs2fow-*-linux-x86_64.zip
+      - packages/SHA256SUMS.txt
+    expire_in: 1 week
+
+studio:
+  stage: build
+  image: node:22-bookworm-slim
+  script:
+    - node --check tools/visibility_point_editor/capsule_visibility.js
+    - node --check tools/visibility_point_editor/bvh8.js
+    - node --check tools/visibility_point_editor/bvh8_worker.js
+    - node --check tools/visibility_point_editor/fps_runtime.js
+    - node --check tools/visibility_point_editor/viewer.js
+    - node tools/visibility_point_editor/check_bvh8.mjs
+    - node tools/visibility_point_editor/check_fps.mjs
