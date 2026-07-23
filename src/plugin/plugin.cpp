@@ -88,6 +88,40 @@ std::filesystem::path module_path(const void *address)
 #endif
 }
 
+using create_entity_by_name_fn = CEntityInstance *(*)(const char *, int);
+using dispatch_spawn_fn = void (*)(CEntityInstance *, void *);
+using remove_entity_fn = void (*)(CEntityInstance *);
+using teleport_entity_fn = void (*)(CEntityInstance *, const Vector *, const QAngle *, const Vector *);
+
+constexpr uint32_t k_los_animated_color = 0x00ff00;
+constexpr uint32_t k_los_muzzle_color = 0x00ffff;
+constexpr uint32_t k_los_aabb_color = 0xffa500;
+constexpr float k_los_beam_half_length = 1.0f;
+constexpr auto k_los_debug_interval = std::chrono::microseconds(15625);
+
+template <typename type>
+type &entity_field(CEntityInstance *entity, uint32_t offset)
+{
+	return *reinterpret_cast<type *>(reinterpret_cast<uintptr_t>(entity) + offset);
+}
+
+Color los_debug_color(uint32_t color)
+{
+	return Color(static_cast<uint8_t>(color >> 16), static_cast<uint8_t>(color >> 8),
+		static_cast<uint8_t>(color), 255);
+}
+
+bool teleport_entity(CEntityInstance *entity, uint32_t vtable_index, const Vector &origin)
+{
+	void **vtable = entity == nullptr ? nullptr : *reinterpret_cast<void ***>(entity);
+	if (vtable == nullptr || vtable[vtable_index] == nullptr)
+	{
+		return false;
+	}
+	reinterpret_cast<teleport_entity_fn>(vtable[vtable_index])(entity, &origin, nullptr, nullptr);
+	return true;
+}
+
 void on_cs2fow_enable_changed(CConVar<bool> *, CSplitScreenSlot, const bool *new_value, const bool *old_value)
 {
 	if (new_value != nullptr && old_value != nullptr && *new_value != *old_value)
@@ -111,12 +145,16 @@ CConVar<float> cs2fow_he_clear_radius_units("cs2fow_he_clear_radius_units", FCVA
 CConVar<float> cs2fow_he_clear_seconds("cs2fow_he_clear_seconds", FCVAR_NONE, "HE-cleared smoke channel duration", 2.5f,
 	true, 0.0f, true, 10.0f, on_cs2fow_float_changed);
 CConVar<bool> cs2fow_filter_teammates("cs2fow_filter_teammates", FCVAR_NONE, "Apply visibility filtering to teammates", false, on_cs2fow_enable_changed);
-CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 250);
+CConVar<int> cs2fow_update_interval_ms("cs2fow_update_interval_ms", FCVAR_NONE, "Visibility worker update interval", 1, true, 1, true, 100);
+CConVar<int> cs2fow_worker_threads("cs2fow_worker_threads", FCVAR_NONE, "Visibility worker thread count (applies on map activation)", 2, true, 1, true, 4);
 CConVar<float> cs2fow_shoulder_base_units("cs2fow_shoulder_base_units", FCVAR_NONE, "Minimum sideways shoulder origin distance", 48.0f, true, 0.0f, true, 256.0f);
 CConVar<float> cs2fow_shoulder_rtt_scale("cs2fow_shoulder_rtt_scale", FCVAR_NONE, "Sideways shoulder units per RTT millisecond, applied in 25 ms steps", 0.4f, true, 0.0f, true, 4.0f);
 CConVar<float> cs2fow_max_shoulder_units("cs2fow_max_shoulder_units", FCVAR_NONE, "Maximum sideways shoulder origin distance", 128.0f, true, 0.0f, true, 256.0f);
-CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 16, true, 0, true, 1000);
+CConVar<int> cs2fow_visibility_hold_ms("cs2fow_visibility_hold_ms", FCVAR_NONE, "Minimum revealed duration", 47, true, 0, true, 1000);
 CConVar<bool> cs2fow_debug("cs2fow_debug", FCVAR_NONE, "Enable CS2FOW diagnostic logging", false);
+CConVar<int> cs2fow_debug_los_player("cs2fow_debug_los_player", FCVAR_NONE,
+	"Temporarily draw one 1-based player's live capsule axes, muzzle, and AABB corners; 0 removes them",
+	0, true, 0, true, static_cast<int>(k_max_players));
 
 CON_COMMAND_F(cs2fow_status, "Report CS2FOW state", FCVAR_NONE)
 {
@@ -191,7 +229,8 @@ bool plugin::Load(PluginId id, ISmmAPI *ismm, char *error, size_t maxlen, bool l
 
 	std::string reason;
 	const bool avx = cpu_supports_avx();
-	prerequisites_valid_ = avx && read_gamedata(reason) && verify_server_binary(reason) && resolve_schema(reason);
+	prerequisites_valid_ = avx && read_gamedata(reason) && verify_server_binary(reason)
+		&& resolve_bone_functions(reason) && resolve_schema(reason);
 	if (prerequisites_valid_ && game_event_manager_vtable_rva_ != 0)
 	{
 		void *base = module_base(*reinterpret_cast<void **>(game_entities_));
@@ -228,6 +267,7 @@ bool plugin::Unload(char *error, size_t max_length)
 	game_event_load_hook_id_ = 0;
 	automatic_baker_.stop();
 	worker_.stop();
+	destroy_los_debug_beams();
 	if (game_frame_hook_id_ != 0) SH_REMOVE_HOOK_ID(game_frame_hook_id_);
 	if (check_transmit_hook_id_ != 0) SH_REMOVE_HOOK_ID(check_transmit_hook_id_);
 	game_frame_hook_id_ = 0;
@@ -271,6 +311,7 @@ void plugin::OnLevelShutdown()
 {
 	automatic_baker_.stop();
 	worker_.stop();
+	destroy_los_debug_beams(false);
 	data_ = {};
 	source_ = {};
 	reset_transmit_state();
@@ -297,6 +338,12 @@ bool plugin::read_gamedata(std::string &error)
 	transmit_offsets_ = {};
 	smoke_layout_ = {};
 	game_event_manager_vtable_rva_ = 0;
+	lookup_bone_rva_ = 0;
+	get_bone_transform_rva_ = 0;
+	create_entity_by_name_rva_ = 0;
+	dispatch_spawn_rva_ = 0;
+	remove_entity_rva_ = 0;
+	teleport_vtable_index_ = 0;
 	smoke_gamedata_available_ = true;
 #if defined(_WIN32)
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_windows";
@@ -310,6 +357,12 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_windows";
 	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_windows";
 	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_windows";
+	constexpr std::string_view k_lookup_bone_key = "lookup_bone_rva_windows";
+	constexpr std::string_view k_get_bone_transform_key = "get_bone_transform_rva_windows";
+	constexpr std::string_view k_create_entity_key = "create_entity_by_name_rva_windows";
+	constexpr std::string_view k_dispatch_spawn_key = "dispatch_spawn_rva_windows";
+	constexpr std::string_view k_remove_entity_key = "remove_entity_rva_windows";
+	constexpr std::string_view k_teleport_key = "teleport_vtable_index_windows";
 #else
 	constexpr std::string_view k_recipient_key = "recipient_slot_offset_linux";
 	constexpr std::string_view k_server_size_key = "server_binary_size_linux";
@@ -322,6 +375,12 @@ bool plugin::read_gamedata(std::string &error)
 	constexpr std::string_view k_smoke_center_key = "smoke_center_offset_linux";
 	constexpr std::string_view k_smoke_start_time_key = "smoke_start_time_offset_linux";
 	constexpr std::string_view k_game_event_vtable_key = "game_event_manager_vtable_rva_linux";
+	constexpr std::string_view k_lookup_bone_key = "lookup_bone_rva_linux";
+	constexpr std::string_view k_get_bone_transform_key = "get_bone_transform_rva_linux";
+	constexpr std::string_view k_create_entity_key = "create_entity_by_name_rva_linux";
+	constexpr std::string_view k_dispatch_spawn_key = "dispatch_spawn_rva_linux";
+	constexpr std::string_view k_remove_entity_key = "remove_entity_rva_linux";
+	constexpr std::string_view k_teleport_key = "teleport_vtable_index_linux";
 #endif
 	std::string line;
 	while (std::getline(stream, line))
@@ -334,8 +393,11 @@ bool plugin::read_gamedata(std::string &error)
 		const std::string key = line.substr(0, equals);
 		const bool smoke_key = key == k_smoke_volume_key || key == k_smoke_storage_key || key == k_smoke_frame_key
 			|| key == k_smoke_center_key || key == k_smoke_start_time_key;
+		const bool debug_beam_key = key == k_create_entity_key || key == k_dispatch_spawn_key
+			|| key == k_remove_entity_key || key == k_teleport_key;
 		if (key != k_server_size_key && key != k_server_crc_key && key != k_recipient_key && key != k_entity_system_key && key != k_full_update_key
-			&& key != k_game_event_vtable_key && !smoke_key)
+			&& key != k_game_event_vtable_key && key != k_lookup_bone_key && key != k_get_bone_transform_key
+			&& !debug_beam_key && !smoke_key)
 		{
 			continue;
 		}
@@ -343,7 +405,7 @@ bool plugin::read_gamedata(std::string &error)
 		uint32_t value {};
 		if (!parse_gamedata_uint32(text, value))
 		{
-			if (smoke_key || key == k_game_event_vtable_key)
+			if (smoke_key || debug_beam_key || key == k_game_event_vtable_key)
 			{
 				if (smoke_key) smoke_gamedata_available_ = false;
 				continue;
@@ -362,16 +424,25 @@ bool plugin::read_gamedata(std::string &error)
 		if (key == k_smoke_center_key) smoke_layout_.center = value;
 		if (key == k_smoke_start_time_key) smoke_layout_.start_time = value;
 		if (key == k_game_event_vtable_key) game_event_manager_vtable_rva_ = value;
+		if (key == k_lookup_bone_key) lookup_bone_rva_ = value;
+		if (key == k_get_bone_transform_key) get_bone_transform_rva_ = value;
+		if (key == k_create_entity_key) create_entity_by_name_rva_ = value;
+		if (key == k_dispatch_spawn_key) dispatch_spawn_rva_ = value;
+		if (key == k_remove_entity_key) remove_entity_rva_ = value;
+		if (key == k_teleport_key) teleport_vtable_index_ = value;
 	}
 	if (server_binary_size_ == 0 || server_binary_crc32_ == 0 || recipient_slot_offset_ == 0
-		|| entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0)
+		|| entity_system_offset_ == 0 || transmit_offsets_.full_update_offset == 0
+		|| lookup_bone_rva_ == 0 || get_bone_transform_rva_ == 0)
 	{
 		error = "gamedata does not contain this platform's required values";
 		return false;
 	}
 	if (recipient_slot_offset_ < sizeof(CCheckTransmitInfo) || recipient_slot_offset_ > k_max_gamedata_offset || recipient_slot_offset_ % alignof(int) != 0
 		|| entity_system_offset_ < sizeof(void *) || entity_system_offset_ > k_max_gamedata_offset || entity_system_offset_ % alignof(void *) != 0
-		|| !valid_gamedata_offset(transmit_offsets_.full_update_offset, static_cast<uint32_t>(alignof(bool)), k_max_gamedata_offset))
+		|| !valid_gamedata_offset(transmit_offsets_.full_update_offset, static_cast<uint32_t>(alignof(bool)), k_max_gamedata_offset)
+		|| !valid_gamedata_offset(lookup_bone_rva_, 1, k_max_module_rva)
+		|| !valid_gamedata_offset(get_bone_transform_rva_, 1, k_max_module_rva))
 	{
 		error = "gamedata contains invalid offsets for this platform";
 		return false;
@@ -385,6 +456,16 @@ bool plugin::read_gamedata(std::string &error)
 	if (!valid_gamedata_offset(game_event_manager_vtable_rva_, static_cast<uint32_t>(alignof(void *)), k_max_module_rva))
 	{
 		game_event_manager_vtable_rva_ = 0;
+	}
+	if (!valid_gamedata_offset(create_entity_by_name_rva_, 1, k_max_module_rva)
+		|| !valid_gamedata_offset(dispatch_spawn_rva_, 1, k_max_module_rva)
+		|| !valid_gamedata_offset(remove_entity_rva_, 1, k_max_module_rva)
+		|| teleport_vtable_index_ == 0 || teleport_vtable_index_ > k_max_vtable_index)
+	{
+		create_entity_by_name_rva_ = 0;
+		dispatch_spawn_rva_ = 0;
+		remove_entity_rva_ = 0;
+		teleport_vtable_index_ = 0;
 	}
 	return true;
 }
@@ -424,9 +505,29 @@ bool plugin::verify_server_binary(std::string &error)
 	return true;
 }
 
+bool plugin::resolve_bone_functions(std::string &error)
+{
+	void *base = game_entities_ == nullptr ? nullptr : module_base(*reinterpret_cast<void **>(game_entities_));
+	if (base == nullptr)
+	{
+		error = "could not resolve the loaded server binary base for animated body points";
+		return false;
+	}
+	lookup_bone_ = static_cast<uint8_t *>(base) + lookup_bone_rva_;
+	get_bone_transform_ = static_cast<uint8_t *>(base) + get_bone_transform_rva_;
+	if (create_entity_by_name_rva_ != 0)
+	{
+		create_entity_by_name_ = static_cast<uint8_t *>(base) + create_entity_by_name_rva_;
+		dispatch_spawn_ = static_cast<uint8_t *>(base) + dispatch_spawn_rva_;
+		remove_entity_ = static_cast<uint8_t *>(base) + remove_entity_rva_;
+	}
+	return true;
+}
+
 void plugin::disable(std::string reason)
 {
 	worker_.stop();
+	destroy_los_debug_beams();
 	data_ = {};
 	reset_transmit_state();
 	disabled_reason_ = std::move(reason);
@@ -515,8 +616,12 @@ void plugin::activate(bvh8_data data)
 	worker_.stop();
 	reset_transmit_state();
 	data_ = std::move(data);
+	if (!worker_.start(&data_, static_cast<uint32_t>(cs2fow_worker_threads.Get())))
+	{
+		disable("could not start visibility worker threads");
+		return;
+	}
 	disabled_reason_.clear();
-	worker_.start(&data_);
 	META_CONPRINTF("[CS2FOW] active for %s: crc=0x%08x, triangles=%u, nodes=%u, packets=%u\n", map_.c_str(), data_.header.source_crc32,
 		data_.header.triangle_count, data_.header.node_count, data_.header.packet_count);
 }
@@ -556,7 +661,10 @@ void plugin::start_automatic_bake(const std::string &map, const map_source &sour
 #endif
 	disabled_reason_ = "automatic bake in progress";
 	META_CONPRINTF("[CS2FOW] %s for %s; starting automatic bake\n", reason.c_str(), map.c_str());
-	automatic_baker_.start({map, source, base.parent_path().parent_path(), output, baker, vrf});
+	if (!automatic_baker_.start({map, source, base.parent_path().parent_path(), output, baker, vrf}))
+	{
+		disable("could not start automatic baker thread");
+	}
 }
 
 void plugin::poll_automatic_bake()
@@ -591,6 +699,7 @@ void plugin::change_map(const std::string &map)
 {
 	automatic_baker_.stop();
 	worker_.stop();
+	destroy_los_debug_beams();
 	data_ = {};
 	source_ = {};
 	reset_transmit_state();
@@ -626,6 +735,7 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	INetworkGameServer *network_server = g_pNetworkServerService == nullptr ? nullptr : g_pNetworkServerService->GetIGameServer();
 	if (network_server == nullptr)
 	{
+		destroy_los_debug_beams(false);
 		return;
 	}
 	const char *current_map = network_server->GetMapName();
@@ -636,6 +746,7 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	poll_automatic_bake();
 	if (!simulating || !cs2fow_enable.Get() || !disabled_reason_.empty())
 	{
+		destroy_los_debug_beams();
 		return;
 	}
 	CGameEntitySystem *system = entity_system();
@@ -663,6 +774,7 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 		capture_timing_.record(capture_ms);
 	}
+	draw_los_debug(value);
 	last_snapshot_ = now;
 	worker_.submit(std::move(value), static_cast<uint32_t>(cs2fow_visibility_hold_ms.Get()), {
 		cs2fow_shoulder_base_units.Get(),
@@ -671,28 +783,177 @@ void plugin::hook_game_frame(bool simulating, bool first_tick, bool last_tick)
 	});
 }
 
+void plugin::draw_los_debug(const visibility_snapshot &value)
+{
+	const int player_number = cs2fow_debug_los_player.Get();
+	if (player_number == 0)
+	{
+		destroy_los_debug_beams();
+		return;
+	}
+	if (!debug_beam_schema_available_ || create_entity_by_name_ == nullptr || dispatch_spawn_ == nullptr
+		|| remove_entity_ == nullptr || teleport_vtable_index_ == 0 || los_debug_failed_
+		|| value.captured - last_los_debug_draw_ < k_los_debug_interval)
+	{
+		return;
+	}
+	const player_state &player = value.players[static_cast<size_t>(player_number - 1)];
+	if (!player.valid)
+	{
+		destroy_los_debug_beams();
+		return;
+	}
+	CGameEntitySystem *system = entity_system();
+	if (system == nullptr)
+	{
+		destroy_los_debug_beams(false);
+		return;
+	}
+
+	last_los_debug_draw_ = value.captured;
+	const uint32_t capsule_count = player.capsule_count == k_visibility_capsule_count
+		? player.capsule_count : 0u;
+	vec3 muzzle;
+	const bool has_muzzle = visibility_muzzle_point(visibility_sample(player), muzzle);
+	const auto aabb_points = visibility_aabb_points(visibility_sample(player));
+	const uint32_t aabb_start = capsule_count + static_cast<uint32_t>(has_muzzle);
+	const uint32_t debug_count = aabb_start + (capsule_count == 0 ? 0u : k_visibility_aabb_point_count);
+	auto create_entity = reinterpret_cast<create_entity_by_name_fn>(create_entity_by_name_);
+	auto dispatch_spawn = reinterpret_cast<dispatch_spawn_fn>(dispatch_spawn_);
+	auto remove_entity = reinterpret_cast<remove_entity_fn>(remove_entity_);
+	for (uint32_t index = 0; index < los_debug_beams_.size(); ++index)
+	{
+		los_debug_beam &beam = los_debug_beams_[index];
+		CEntityInstance *entity = beam.handle.IsValid() ? system->GetEntityInstance(beam.handle) : nullptr;
+		if (index >= debug_count)
+		{
+			if (entity != nullptr) remove_entity(entity);
+			beam = {};
+			continue;
+		}
+
+		const bool capsule_axis = index < capsule_count;
+		const bool muzzle_axis = !capsule_axis && has_muzzle && index == capsule_count;
+		const vec3 point = muzzle_axis ? muzzle : aabb_points[index - aabb_start];
+		const uint32_t color = capsule_axis ? k_los_animated_color
+			: muzzle_axis ? k_los_muzzle_color : k_los_aabb_color;
+		const vec3 start_point = capsule_axis ? player.capsules[index].start
+			: vec3 {point.x, point.y, point.z - k_los_beam_half_length};
+		const vec3 end_point = capsule_axis ? player.capsules[index].end
+			: vec3 {point.x, point.y, point.z + k_los_beam_half_length};
+		Vector start(start_point.x, start_point.y, start_point.z);
+		Vector end(end_point.x, end_point.y, end_point.z);
+		if (entity == nullptr)
+		{
+			entity = create_entity("env_beam", -1);
+			const CEntityHandle handle = entity_handle(entity);
+			if (entity == nullptr || !handle.IsValid() || !teleport_entity(entity, teleport_vtable_index_, start))
+			{
+				if (entity != nullptr) remove_entity(entity);
+				entity = nullptr;
+			}
+			else
+			{
+				entity_field<Vector>(entity, fields_.beam_end_position) = end;
+				entity_field<float>(entity, fields_.beam_width) = 1.25f;
+				entity_field<float>(entity, fields_.beam_end_width) = 1.25f;
+				entity_field<Color>(entity, fields_.render_color) = los_debug_color(color);
+				dispatch_spawn(entity, nullptr);
+				entity = system->GetEntityInstance(handle);
+				if (entity != nullptr) beam = {handle, color};
+			}
+			if (entity == nullptr || !beam.handle.IsValid())
+			{
+				destroy_los_debug_beams();
+				los_debug_failed_ = true;
+				META_CONPRINTF("[CS2FOW] temporary LOS beam creation failed; set cs2fow_debug_los_player 0 before retrying\n");
+				return;
+			}
+			continue;
+		}
+
+		if (!teleport_entity(entity, teleport_vtable_index_, start))
+		{
+			destroy_los_debug_beams();
+			los_debug_failed_ = true;
+			META_CONPRINTF("[CS2FOW] temporary LOS beam movement failed; set cs2fow_debug_los_player 0 before retrying\n");
+			return;
+		}
+		entity_field<Vector>(entity, fields_.beam_end_position) = end;
+		entity->NetworkStateChanged(NetworkStateChangedData(fields_.beam_end_position));
+		if (beam.color != color)
+		{
+			entity_field<Color>(entity, fields_.render_color) = los_debug_color(color);
+			entity->NetworkStateChanged(NetworkStateChangedData(fields_.render_color));
+			beam.color = color;
+		}
+	}
+}
+
+void plugin::destroy_los_debug_beams(bool remove_entities)
+{
+	CGameEntitySystem *system = remove_entities ? entity_system() : nullptr;
+	auto remove_entity = reinterpret_cast<remove_entity_fn>(remove_entity_);
+	for (los_debug_beam &beam : los_debug_beams_)
+	{
+		if (system != nullptr && remove_entity != nullptr && beam.handle.IsValid())
+		{
+			if (CEntityInstance *entity = system->GetEntityInstance(beam.handle); entity != nullptr)
+			{
+				remove_entity(entity);
+			}
+		}
+		beam = {};
+	}
+	last_los_debug_draw_ = {};
+	los_debug_failed_ = false;
+}
+
 void plugin::print_status() const
 {
 	const worker_stats stats = worker_.stats();
 	const std::shared_ptr<const visibility_result> result = worker_.result();
 	runtime_timing_stats capture_timing;
+	runtime_timing_stats bone_timing;
 	runtime_timing_stats transmit_timing;
+	uint32_t capsule_players = 0;
+	uint32_t capsule_failed_players = 0;
 	{
 		std::lock_guard<std::mutex> lock(transmit_state_mutex_);
 		capture_timing = capture_timing_;
+		bone_timing = bone_timing_;
 		transmit_timing = transmit_timing_;
+		capsule_players = capsule_players_;
+		capsule_failed_players = capsule_failed_players_;
 	}
 	const double age_ms = result ? std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - result->captured).count() : -1.0;
 	META_CONPRINTF("[CS2FOW] %s; map=%s crc=0x%08x version=%u triangles=%u nodes=%u packets=%u bytes=%llu depth=%u\n",
 		disabled_reason_.empty() && cs2fow_enable.Get() ? "active" : (disabled_reason_.empty() ? "disabled by convar" : disabled_reason_.c_str()), map_.c_str(),
 		data_.header.source_crc32, data_.header.version, data_.header.triangle_count, data_.header.node_count, data_.header.packet_count,
 		static_cast<unsigned long long>(data_.header.file_size), data_.header.max_depth);
-	META_CONPRINTF("[CS2FOW] worker latest=%.3fms average=%.3fms maximum=%.3fms snapshot_age=%.1fms pairs=%u visible=%u hidden=%u cycles=%llu\n",
-		stats.latest_ms, stats.average_ms, stats.maximum_ms, age_ms, stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs,
+	META_CONPRINTF("[CS2FOW] worker threads=%u wall=%.3fms active=%.3fms recent_p95=%.3fms recent_p99=%.3fms lifetime_average=%.3fms maximum=%.3fms snapshot_age=%.1fms\n",
+		stats.thread_count, stats.latest_ms, stats.latest_active_ms, stats.recent_p95_ms, stats.recent_p99_ms,
+		stats.average_ms, stats.maximum_ms, age_ms);
+	META_CONPRINTF("[CS2FOW] workload pairs=%u visible=%u hidden=%u hold=%u pixels=%u rays=%u probes=%u/%u nodes=%u triangles=%u cache=%u/%u budget=%llu cycles=%llu\n",
+		stats.evaluated_pairs, stats.visible_pairs, stats.hidden_pairs, stats.hold_reuses,
+		stats.sampled_pixels, stats.traced_rays,
+		stats.visibility_probe_hits, stats.visibility_probe_rays, stats.visited_nodes, stats.rasterized_triangles,
+		stats.occluder_cache_hits, stats.occluder_cache_hits + stats.occluder_cache_misses,
+		static_cast<unsigned long long>(stats.budget_exhaustions),
 		static_cast<unsigned long long>(stats.cycles));
+	const double average_proof_leaves = stats.rebuilt_proofs == 0 ? 0.0
+		: static_cast<double>(stats.rebuilt_proof_leaves) / static_cast<double>(stats.rebuilt_proofs);
+	META_CONPRINTF("[CS2FOW] MOC draws=%u rects=%u proofs=%u proof_leaves=%.1f/%u cache_capacity=%u saturated=%u compact=%u/%u saved=%u uncached_blocked=%u\n",
+		stats.moc_render_calls, stats.moc_rect_tests, stats.rebuilt_proofs, average_proof_leaves,
+		stats.max_rebuilt_proof_leaves, k_capsule_occluder_cache_size,
+		stats.cache_saturations, stats.cache_compactions, stats.cache_compaction_trials,
+		stats.cache_compaction_leaves_saved, stats.uncached_blocked);
 	META_CONPRINTF("[CS2FOW] capture latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu\n",
 		capture_timing.latest_ms, capture_timing.average_ms(), capture_timing.maximum_ms,
 		static_cast<unsigned long long>(capture_timing.calls));
+	META_CONPRINTF("[CS2FOW] bones latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu capsules=%u failed=%u\n",
+		bone_timing.latest_ms, bone_timing.average_ms(), bone_timing.maximum_ms,
+		static_cast<unsigned long long>(bone_timing.calls), capsule_players, capsule_failed_players);
 	META_CONPRINTF("[CS2FOW] transmit latest=%.3fms average=%.3fms maximum=%.3fms calls=%llu\n",
 		transmit_timing.latest_ms, transmit_timing.average_ms(), transmit_timing.maximum_ms,
 		static_cast<unsigned long long>(transmit_timing.calls));
@@ -705,6 +966,12 @@ void plugin::print_status() const
 	META_CONPRINTF("[CS2FOW] teammate filtering configured=%d ffa=%d effective=%d\n",
 		cs2fow_filter_teammates.Get() ? 1 : 0, ffa ? 1 : 0,
 		visibility_teammate_filter_enabled(cs2fow_filter_teammates.Get(), ffa) ? 1 : 0);
+	const uint32_t debug_beams = static_cast<uint32_t>(std::count_if(los_debug_beams_.begin(), los_debug_beams_.end(),
+		[](const los_debug_beam &beam) { return beam.handle.IsValid(); }));
+	META_CONPRINTF("[CS2FOW] temporary LOS debug player=%d available=%d beams=%u failed=%d\n",
+		cs2fow_debug_los_player.Get(), debug_beam_schema_available_ && create_entity_by_name_ != nullptr
+			&& dispatch_spawn_ != nullptr && remove_entity_ != nullptr && teleport_vtable_index_ != 0 ? 1 : 0,
+		debug_beams, los_debug_failed_ ? 1 : 0);
 	std::string bake_map;
 	double bake_elapsed_ms = 0;
 	if (automatic_baker_.status(bake_map, bake_elapsed_ms))

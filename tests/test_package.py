@@ -1,4 +1,5 @@
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,6 +31,10 @@ REPORT = {
 
 
 class PackageTests(unittest.TestCase):
+    def test_readme_does_not_link_release_binaries(self):
+        urls = re.findall(r'https?://[^\s)"<>]+', (package.ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertFalse([url for url in urls if "/releases/" in url or re.search(r"\.(?:zip|exe|dll|so)(?:$|[?#])", url)])
+
     def test_map_pair_metadata_must_match_inspected_bake(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

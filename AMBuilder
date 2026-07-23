@@ -1,4 +1,4 @@
-# Defines exactly which first-party sources enter the baker, tests, and plugin.
+# Defines exactly which project and pinned SDK sources enter each build target.
 # AMBuild supplies the compilers; this file outputs three platform build targets.
 
 import os
@@ -16,11 +16,11 @@ def configure(compiler, plugin=False):
   os.path.join(root, 'third_party', 'generated'),
   ]
   if compiler.behavior == 'msvc':
-    compiler.cflags += ['/W4', '/std:c++20', '/arch:AVX', '/EHsc', '/permissive-']
+    compiler.cflags += ['/W4', '/std:c++20', '/EHsc', '/permissive-']
     compiler.cflags += ['/MTd'] if builder.options.debug else ['/MT']
     compiler.defines += ['_CRT_SECURE_NO_WARNINGS', 'NOMINMAX']
   else:
-    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-mavx', '-pthread']
+    compiler.cflags += ['-Wall', '-Wextra', '-Wpedantic', '-pthread', '-msse4.1', '-fno-strict-aliasing']
     compiler.linkflags += ['-pthread']
     compiler.cxxflags += ['-std=c++20']
     if plugin:
@@ -65,7 +65,10 @@ if 'NDEBUG' in tests.compiler.defines:
 tests.sources += geometry + map_io + [
   os.path.join(root, 'src', 'core', 'pvs.cpp'),
   os.path.join(root, 'src', 'core', 'pvs_format.cpp'),
+  os.path.join(root, 'third_party', 'masked_occlusion_culling', 'MaskedOcclusionCulling.cpp'),
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
+  os.path.join(root, 'src', 'core', 'capsule_visibility.cpp'),
+  os.path.join(root, 'src', 'core', 'masked_occlusion_stubs.cpp'),
   os.path.join(root, 'src', 'core', 'smoke_occlusion.cpp'),
   os.path.join(root, 'src', 'core', 'visibility_sampling.cpp'),
   os.path.join(root, 'src', 'baker', 'glb_import.cpp'),
@@ -90,8 +93,11 @@ for manifest in config.sdk_manifests:
 plugin.compiler.defines += ['META_IS_SOURCE2', 'CS2FOW_VERSION="{}"'.format(version)]
 config.SdkHelpers.configureCxx(builder, plugin, sdk)
 plugin.sources += [
+  os.path.join(root, 'third_party', 'masked_occlusion_culling', 'MaskedOcclusionCulling.cpp'),
   os.path.join(root, 'src', 'core', 'bvh8.cpp'),
   os.path.join(root, 'src', 'core', 'bvh8_format.cpp'),
+  os.path.join(root, 'src', 'core', 'capsule_visibility.cpp'),
+  os.path.join(root, 'src', 'core', 'masked_occlusion_stubs.cpp'),
   os.path.join(root, 'src', 'core', 'map_source.cpp'),
   os.path.join(root, 'src', 'core', 'subprocess.cpp'),
   os.path.join(root, 'src', 'core', 'smoke_occlusion.cpp'),

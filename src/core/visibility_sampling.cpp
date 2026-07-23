@@ -1,8 +1,7 @@
 #include "visibility_sampling.h"
 
-// Builds current eye/input origins plus body, axis-aligned box, and weapon-muzzle
-// points from copied player numbers. Input origins stop at baked walls; all
-// returned counts remain inside fixed arrays used by the worker.
+// Builds current eye/input origins and the legacy weapon-muzzle point from
+// copied player values. Body visibility uses the separately captured capsules.
 
 #include <algorithm>
 #include <cmath>
@@ -12,8 +11,6 @@ namespace cs2fow
 namespace
 {
 
-constexpr float k_horizontal_bounds_padding = 8.0f;
-constexpr float k_top_bounds_padding = 8.0f;
 constexpr float k_vertical_origin_offset = 16.0f;
 constexpr float k_ping_step_ms = 25.0f;
 constexpr float k_same_point_epsilon_sq = 1.0e-4f;
@@ -22,29 +19,8 @@ constexpr float k_degrees_to_radians = 0.017453292519943295769f;
 constexpr float k_standing_player_height = 72.0f;
 constexpr float k_pelvis_height = 38.0f;
 constexpr float k_muzzle_z = 60.0f;
-
-struct body_point
-{
-	vec3 local;
-};
-
-constexpr std::array<body_point, 15> k_body_points {{
-	{{5.609201635493794f, -1.4428278502142438f, 64.2012733036622f}},
-	{{2.0125293444485384f, 2.7306012182339385f, 59.938710028873956f}},
-	{{0.0f, 3.6606043089445834f, 54.0f}},
-	{{-3.4531053226609565f, 5.946114299110735f, 38.0f}},
-	{{6.649097464536467f, 9.206736663527453f, 61.50515964236403f}},
-	{{-4.609436263442105f, -6.65497499510368f, 62.674399985034256f}},
-	{{2.023447514568512f, 12.575529525946793f, 38.476983901746856f}},
-	{{-3.5065278282472674f, -5.103061971464753f, 38.0f}},
-	{{11.492137476801554f, 6.0f, 22.0f}},
-	{{-4.297040890272927f, -6.0f, 22.0f}},
-	{{11.870334433375513f, 10.522994945593906f, 4.0f}},
-	{{-11.849791908865742f, -5.0f, 4.0f}},
-	{{0.0f, -10.546890805234906f, 51.22609251649996f}},
-	{{16.97650970898366f, 6.7731795517149544f, 51.74577989786342f}},
-	{{-1.738377928258503f, 4.30848079861881f, 46.753597185311996f}}
-}};
+constexpr float k_horizontal_bounds_padding = 16.0f;
+constexpr float k_top_bounds_padding = 4.0f;
 
 float distance_sq(vec3 a, vec3 b)
 {
@@ -81,25 +57,9 @@ vec3 eye_forward(float yaw_degrees)
 	return {std::cos(yaw), std::sin(yaw), 0.0f};
 }
 
-bounds player_bounds(const visibility_player &player, vec3 origin)
-{
-	return {
-		{origin.x + player.mins.x - k_horizontal_bounds_padding,
-			origin.y + player.mins.y - k_horizontal_bounds_padding,
-			origin.z + player.mins.z},
-		{origin.x + player.maxs.x + k_horizontal_bounds_padding,
-			origin.y + player.maxs.y + k_horizontal_bounds_padding,
-			origin.z + player.maxs.z + k_top_bounds_padding}
-	};
-}
-
 vec3 safe_origin(const bvh8_data &data, vec3 eye, vec3 candidate)
 {
-	if (distance_sq(eye, candidate) <= k_same_point_epsilon_sq)
-	{
-		return eye;
-	}
-	if (segment_blocked(data, eye, candidate).blocked)
+	if (distance_sq(eye, candidate) <= k_same_point_epsilon_sq || segment_blocked(data, eye, candidate).blocked)
 	{
 		return eye;
 	}
@@ -118,23 +78,15 @@ float adjusted_local_z(const visibility_player &player, float z)
 	return player.mins.z + k_pelvis_height + (z - k_pelvis_height) * live_upper / standing_upper;
 }
 
-vec3 local_to_world(const visibility_player &player, vec3 origin, vec3 local)
+vec3 local_to_world(const visibility_player &player, vec3 local)
 {
 	const vec3 forward = eye_forward(player.eye_yaw_degrees);
 	const vec3 right = eye_right(player.eye_yaw_degrees);
 	return {
-		origin.x + forward.x * local.x - right.x * local.y,
-		origin.y + forward.y * local.x - right.y * local.y,
-		origin.z + adjusted_local_z(player, local.z)
+		player.origin.x + forward.x * local.x - right.x * local.y,
+		player.origin.y + forward.y * local.x - right.y * local.y,
+		player.origin.z + adjusted_local_z(player, local.z)
 	};
-}
-
-void add_point(visibility_target_points &targets, vec3 point)
-{
-	if (targets.count < targets.points.size())
-	{
-		targets.points[targets.count++] = point;
-	}
 }
 
 void add_origin(visibility_origin_points &origins, vec3 point)
@@ -152,37 +104,71 @@ void add_origin(visibility_origin_points &origins, vec3 point)
 	}
 }
 
-void add_aabb_corners(visibility_target_points &targets, bounds box)
-{
-	add_point(targets, {box.min.x, box.min.y, box.min.z});
-	add_point(targets, {box.max.x, box.min.y, box.min.z});
-	add_point(targets, {box.min.x, box.max.y, box.min.z});
-	add_point(targets, {box.max.x, box.max.y, box.min.z});
-	add_point(targets, {box.min.x, box.min.y, box.max.z});
-	add_point(targets, {box.max.x, box.min.y, box.max.z});
-	add_point(targets, {box.min.x, box.max.y, box.max.z});
-	add_point(targets, {box.max.x, box.max.y, box.max.z});
-}
-
-void add_body_points(visibility_target_points &targets, const visibility_player &player, vec3 origin)
-{
-	for (const body_point &point : k_body_points)
-	{
-		add_point(targets, local_to_world(player, origin, point.local));
-	}
-}
-
-void add_muzzle_point(visibility_target_points &targets, const visibility_player &player, vec3 origin)
-{
-	const float length = weapon_muzzle_length(player.muzzle_class);
-	if (length <= 0.0f)
-	{
-		return;
-	}
-	add_point(targets, local_to_world(player, origin, {length, 0.0f, k_muzzle_z}));
-}
-
 } // namespace
+
+// Valve's shared player HitboxCapsule set, extracted from the current SAS and
+// Phoenix VMDLs. Endpoints and radii are Source units in each named bone.
+const std::array<visibility_capsule_binding, k_visibility_capsule_count> k_visibility_capsule_bindings {{
+	{"head_0", {-1.0f, 1.8f, 0.0f}, {3.5f, 0.2f, 0.0f}, 4.3f},
+	{"neck_0", {0.0f, -0.4f, 0.0f}, {1.4f, -0.2f, 0.0f}, 3.5f},
+	{"pelvis", {-2.7f, 1.1f, -3.2f}, {-2.7f, 1.1f, 3.2f}, 6.0f},
+	{"spine_0", {1.4f, 0.8f, 3.1f}, {1.4f, 0.8f, -3.1f}, 6.0f},
+	{"spine_1", {3.8f, 0.8f, -2.4f}, {3.8f, 0.4f, 2.4f}, 6.5f},
+	{"spine_2", {4.8f, 0.15f, -4.1f}, {4.8f, 0.15f, 4.1f}, 6.2f},
+	{"spine_3", {2.5f, -0.6f, -6.0f}, {2.5f, -0.6f, 6.0f}, 5.0f},
+	{"leg_upper_l", {1.3f, -0.2f, 0.0f}, {16.5f, -0.7f, 0.0f}, 5.0f},
+	{"leg_upper_r", {-1.3f, 0.0f, -0.6f}, {-16.5f, 0.0f, -0.7f}, 5.0f},
+	{"leg_lower_l", {0.1f, -0.4f, 0.2f}, {17.0f, -0.4f, 0.7f}, 4.0f},
+	{"leg_lower_r", {-0.1f, 0.0f, -0.2f}, {-17.0f, 0.4f, -0.7f}, 4.0f},
+	{"ankle_l", {0.0f, -3.43f, -0.52f}, {8.0f, 0.74f, 0.33f}, 2.6f},
+	{"ankle_r", {-7.98f, -0.75f, -0.27f}, {-0.02f, 3.44f, 0.58f}, 2.6f},
+	{"hand_l", {0.0f, 0.3f, 0.0f}, {3.59f, 1.15f, 0.11f}, 2.3f},
+	{"hand_r", {0.0f, -0.3f, 0.02f}, {-3.44f, -1.17f, -0.09f}, 2.3f},
+	{"arm_upper_l", {0.0f, 0.0f, 0.0f}, {11.2f, 0.0f, 0.0f}, 3.3f},
+	{"arm_lower_l", {0.0f, 0.0f, 0.0f}, {10.0f, 0.0f, 0.0f}, 3.0f},
+	{"arm_upper_r", {0.0f, 0.0f, 0.0f}, {-11.2f, 0.0f, 0.0f}, 3.3f},
+	{"arm_lower_r", {0.0f, 0.0f, 0.0f}, {-10.0f, 0.0f, -0.5f}, 3.0f}
+}};
+
+bool visibility_transform_point(const visibility_bone_transform &transform, vec3 local, vec3 &world)
+{
+	const float x = transform.rotation[0];
+	const float y = transform.rotation[1];
+	const float z = transform.rotation[2];
+	const float w = transform.rotation[3];
+	const float norm = x * x + y * y + z * z + w * w;
+	if (!std::isfinite(transform.position.x) || !std::isfinite(transform.position.y)
+		|| !std::isfinite(transform.position.z) || !std::isfinite(norm) || norm < 0.25f || norm > 4.0f)
+	{
+		return false;
+	}
+	const float inverse_length = 1.0f / std::sqrt(norm);
+	const float qx = x * inverse_length;
+	const float qy = y * inverse_length;
+	const float qz = z * inverse_length;
+	const float qw = w * inverse_length;
+	const vec3 twice_cross {
+		2.0f * (qy * local.z - qz * local.y),
+		2.0f * (qz * local.x - qx * local.z),
+		2.0f * (qx * local.y - qy * local.x)
+	};
+	world = {
+		transform.position.x + local.x + qw * twice_cross.x + qy * twice_cross.z - qz * twice_cross.y,
+		transform.position.y + local.y + qw * twice_cross.y + qz * twice_cross.x - qx * twice_cross.z,
+		transform.position.z + local.z + qw * twice_cross.z + qx * twice_cross.y - qy * twice_cross.x
+	};
+	return std::isfinite(world.x) && std::isfinite(world.y) && std::isfinite(world.z);
+}
+
+bool valid_visibility_capsule(const visibility_capsule &capsule)
+{
+	const auto finite = [](vec3 value)
+	{
+		return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+	};
+	return finite(capsule.start) && finite(capsule.end) && std::isfinite(capsule.radius)
+		&& capsule.radius > 0.0f && capsule.radius <= 32.0f;
+}
 
 float visibility_shoulder_offset_units(float rtt_seconds, const visibility_tuning &tuning)
 {
@@ -222,43 +208,13 @@ weapon_muzzle_class weapon_muzzle_class_from_item_definition(uint16_t item_defin
 {
 	switch (item_definition)
 	{
-		case 1: // deagle
-		case 2: // elite
-		case 3: // fiveseven
-		case 4: // glock
-		case 30: // tec9
-		case 32: // hkp2000
-		case 36: // p250
-		case 61: // usp_silencer
-		case 63: // cz75a
-		case 64: // revolver
+		case 1: case 2: case 3: case 4: case 30: case 32: case 36: case 61: case 63: case 64:
 			return weapon_muzzle_class::pistol;
-		case 17: // mac10
-		case 19: // p90
-		case 23: // mp5sd
-		case 24: // ump45
-		case 26: // bizon
-		case 33: // mp7
-		case 34: // mp9
+		case 17: case 19: case 23: case 24: case 26: case 33: case 34:
 			return weapon_muzzle_class::smg;
-		case 9: // awp
-		case 11: // g3sg1
-		case 38: // scar20
-		case 40: // ssg08
+		case 9: case 11: case 38: case 40:
 			return weapon_muzzle_class::sniper;
-		case 7: // ak47
-		case 8: // aug
-		case 10: // famas
-		case 13: // galilar
-		case 14: // m249
-		case 16: // m4a1
-		case 25: // xm1014
-		case 27: // mag7
-		case 28: // negev
-		case 29: // sawedoff
-		case 35: // nova
-		case 39: // sg556
-		case 60: // m4a1_silencer
+		case 7: case 8: case 10: case 13: case 14: case 16: case 25: case 27: case 28: case 29: case 35: case 39: case 60:
 			return weapon_muzzle_class::rifle;
 		default:
 			return weapon_muzzle_class::none;
@@ -288,11 +244,10 @@ visibility_origin_points visibility_origins(const bvh8_data &data, const visibil
 	const vec3 left = subtract(player.eye, shoulder);
 	const vec3 right = add(player.eye, shoulder);
 	const vec3 vertical {0.0f, 0.0f, k_vertical_origin_offset};
-	const vec3 up = add(player.eye, vertical);
 	add_origin(origins, player.eye);
 	add_origin(origins, safe_origin(data, player.eye, left));
 	add_origin(origins, safe_origin(data, player.eye, right));
-	add_origin(origins, safe_origin(data, player.eye, up));
+	add_origin(origins, safe_origin(data, player.eye, add(player.eye, vertical)));
 	add_origin(origins, player.origin);
 
 	const float forward_input = static_cast<float>((player.movement_buttons & k_visibility_button_forward) != 0)
@@ -310,13 +265,30 @@ visibility_origin_points visibility_origins(const bvh8_data &data, const visibil
 	return origins;
 }
 
-visibility_target_points visibility_targets(const visibility_player &player)
+bool visibility_muzzle_point(const visibility_player &player, vec3 &point)
 {
-	visibility_target_points targets;
-	add_aabb_corners(targets, player_bounds(player, player.origin));
-	add_body_points(targets, player, player.origin);
-	add_muzzle_point(targets, player, player.origin);
-	return targets;
+	const float length = weapon_muzzle_length(player.muzzle_class);
+	if (length <= 0.0f)
+	{
+		return false;
+	}
+	point = local_to_world(player, {length, 0.0f, k_muzzle_z});
+	return true;
+}
+
+std::array<vec3, k_visibility_aabb_point_count> visibility_aabb_points(const visibility_player &player)
+{
+	const vec3 minimum {player.origin.x + player.mins.x - k_horizontal_bounds_padding,
+		player.origin.y + player.mins.y - k_horizontal_bounds_padding, player.origin.z + player.mins.z};
+	const vec3 maximum {player.origin.x + player.maxs.x + k_horizontal_bounds_padding,
+		player.origin.y + player.maxs.y + k_horizontal_bounds_padding,
+		player.origin.z + player.maxs.z + k_top_bounds_padding};
+	return {{
+		{minimum.x, minimum.y, minimum.z}, {maximum.x, minimum.y, minimum.z},
+		{minimum.x, maximum.y, minimum.z}, {maximum.x, maximum.y, minimum.z},
+		{minimum.x, minimum.y, maximum.z}, {maximum.x, minimum.y, maximum.z},
+		{minimum.x, maximum.y, maximum.z}, {maximum.x, maximum.y, maximum.z}
+	}};
 }
 
 } // namespace cs2fow
