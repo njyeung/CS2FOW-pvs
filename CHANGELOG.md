@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Restored eight padded AABB corner checks as a fast, forgiving visibility fallback before the full animated-capsule test. The runtime now tries reveal-hold reuse, chest, AABB corners, muzzle, and finally capsules, so an obvious visible point avoids the more expensive capsule pass.
+- Increased the default reveal hold from 16 ms to 47 ms (about three 64-tick server ticks) to reduce edge flicker and short pop-outs.
+- Added the AABB corner samples to the temporary in-game LOS debug view and aligned Visibility Studio with the runtime's current LOS order, padding, hold, cache, validation, and pose behavior.
+- Rebuilt against Metamod:Source `2667e8e` and HL2SDK `c9e9477` while retaining Steam Runtime 3 compatibility.
+
 ## 0.3.0
 
 - Replaced the fifteen hand-tuned runtime LOS dots and eight AABB corners with Valve's nineteen live animated hitbox capsules. Visibility now evaluates the capsule silhouette through a bounded CPU depth buffer, preserves the muzzle/smoke/HE rules, and fails open on invalid capture, uncertainty, or a 75 ms worker budget.
